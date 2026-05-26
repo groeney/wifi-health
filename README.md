@@ -13,7 +13,7 @@ Click the dot for signal metrics, noise levels, and specific recommendations.
 ## Install
 
 ```bash
-git clone git@github.com:jamesgroeneveld/wifi-health.git
+git clone git@github.com:groeney/wifi-health.git
 cd wifi-health
 bash install.sh
 ```
