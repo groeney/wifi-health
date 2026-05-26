@@ -34,6 +34,41 @@ SNR=$((RSSI - NOISE))
 
 RECS=()
 LEVS=()
+NO_INTERNET=0
+
+check_internet() {
+    # The most important check: can we actually reach the internet?
+    # A strong wifi link means nothing if there's no connectivity behind it.
+    # Try ping first (fast), fall back to TCP (works when ICMP is blocked).
+    if ping -c 1 -W 3 1.1.1.1 >/dev/null 2>&1; then
+        return
+    fi
+    if nc -z -w 3 1.1.1.1 443 2>/dev/null; then
+        return
+    fi
+    NO_INTERNET=1
+    RECS+=("No internet — try a hotspot, sign in to the network, or find another connection")
+    LEVS+=("high")
+}
+
+check_captive_portal() {
+    # Skip if we already know there's no internet at all.
+    [ "$NO_INTERNET" -eq 1 ] && return
+    # Use Apple's captive portal endpoint. A real connection returns
+    # exactly "<HTML>...<TITLE>Success</TITLE>...</HTML>".
+    # Portals intercept this with a redirect or login page.
+    # Drop -f so we get the response body even on redirects.
+    local resp
+    resp=$(curl -sS --max-time 4 -o - "http://captive.apple.com/hotspot-detect.html" 2>/dev/null)
+    local rc=$?
+    if [ $rc -ne 0 ]; then
+        RECS+=("Network is blocking web traffic — check for a login page")
+        LEVS+=("high")
+    elif ! echo "$resp" | grep -q "<TITLE>Success</TITLE>"; then
+        RECS+=("Captive portal detected — open a browser to sign in")
+        LEVS+=("high")
+    fi
+}
 
 check_band() {
     if [ "$BAND" = "2.4GHz" ]; then
@@ -72,27 +107,15 @@ check_link_speed() {
     fi
 }
 
-check_captive_portal() {
-    # Detect captive portals (hotel/airport/cafe login walls).
-    # A quick HTTP check against Apple's captive portal detection endpoint.
-    local resp
-    resp=$(curl -fsS --max-time 3 "http://captive.apple.com/hotspot-detect.html" 2>/dev/null)
-    if [ $? -ne 0 ]; then
-        RECS+=("Network may be blocking traffic — check for a login page")
-        LEVS+=("high")
-    elif ! echo "$resp" | grep -q "Success"; then
-        RECS+=("Captive portal detected — open a browser to sign in")
-        LEVS+=("high")
-    fi
-}
-
 # ── Run all checks ──────────────────────────────────────────────────
+# Internet reachability runs first — it's the most important signal.
 # Add new check_* calls here:
+check_internet
+check_captive_portal
 check_band
 check_signal
 check_noise
 check_link_speed
-check_captive_portal
 
 # ── Score ───────────────────────────────────────────────────────────
 HIGH=0
@@ -111,10 +134,13 @@ else
 fi
 
 # ── Color logic ─────────────────────────────────────────────────────
+# No internet trumps everything — it's always RED.
 # GREEN  — connection is solid, nothing to fix
 # YELLOW — some improvements possible, or weak but nothing actionable
-# RED    — poor + clear things you can fix right now
-if [ "$SIG" = "good" ] && [ "$HIGH" -eq 0 ] && [ "$MED" -eq 0 ]; then
+# RED    — no internet, or poor + clear things you can fix right now
+if [ "$NO_INTERNET" -eq 1 ]; then
+    COLOR="#F44336"; LABEL="No Internet"; MSG="Connected to wifi but can't reach the web"
+elif [ "$SIG" = "good" ] && [ "$HIGH" -eq 0 ] && [ "$MED" -eq 0 ]; then
     COLOR="#4CAF50"; LABEL="Good"; MSG="You're good"
 elif [ "$HIGH" -gt 0 ] && [ "$SIG" = "poor" ]; then
     COLOR="#F44336"; LABEL="Needs Attention"; MSG="You can really improve your connection"
