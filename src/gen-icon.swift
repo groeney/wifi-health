@@ -30,11 +30,46 @@ func hexColor(_ s: String) -> NSColor {
 let dotColor   = hexColor(colorHex)
 let arrowColor = NSColor(white: 0.55, alpha: 1.0)
 
-// Canvas. Compact width when idle (just the dot); a bit wider when an
-// arrow is being drawn. macOS scales these "point" dimensions for
-// Retina automatically because we use NSImage with point-sized canvas.
-let width:  CGFloat = activity == "none" ? 13 : 20
-let height: CGFloat = 14
+// ── Geometry ────────────────────────────────────────────────────────
+// Idle: nothing but the dot, in a canvas just wide enough to contain
+// it. Active: dot + a small arrow tucked flush against it. Width grows
+// only as much as the glyph needs so we waste no menu bar pixels.
+let height:     CGFloat = 14
+let leftPad:    CGFloat = 1
+let dotSize:    CGFloat = 9
+let dotEnd:     CGFloat = leftPad + dotSize    // 10
+let gap:        CGFloat = 1
+let rightPad:   CGFloat = 1
+
+// Pick the arrow glyph. ↕ (U+2195) is a single character for "both"
+// directions — narrower and clearer at small sizes than ⇅.
+let glyph: String? = {
+    switch activity {
+    case "down": return "↓"
+    case "up":   return "↑"
+    case "both": return "↕"
+    default:     return nil
+    }
+}()
+
+let arrowFont = NSFont.systemFont(ofSize: 8)
+let arrowAttrs: [NSAttributedString.Key: Any] = [
+    .font: arrowFont,
+    .foregroundColor: arrowColor,
+]
+
+// Measure the glyph so the canvas width can be exact.
+var arrowWidth: CGFloat = 0
+var arrowStr: NSAttributedString? = nil
+if let g = glyph {
+    let s = NSAttributedString(string: g, attributes: arrowAttrs)
+    arrowStr  = s
+    arrowWidth = ceil(s.size().width)
+}
+
+let width: CGFloat = glyph == nil
+    ? dotEnd + rightPad                       // idle: 11pt
+    : dotEnd + gap + arrowWidth + rightPad    // active: tight to glyph
 
 let image = NSImage(size: NSSize(width: width, height: height))
 image.lockFocus()
@@ -44,10 +79,9 @@ if let ctx = NSGraphicsContext.current {
     ctx.imageInterpolation = .high
 }
 
-// Dot on the left — 9pt diameter, vertically centered.
-let dotSize: CGFloat = 9.0
+// Dot on the left, vertically centered.
 let dotRect = NSRect(
-    x: 1.0,
+    x: leftPad,
     y: (height - dotSize) / 2.0,
     width: dotSize,
     height: dotSize
@@ -55,26 +89,12 @@ let dotRect = NSRect(
 dotColor.setFill()
 NSBezierPath(ovalIn: dotRect).fill()
 
-// Arrow on the right, drawn as text so we get clean glyph rendering.
-if activity != "none" {
-    let glyph: String = {
-        switch activity {
-        case "down": return "↓"
-        case "up":   return "↑"
-        case "both": return "⇅"
-        default:     return ""
-        }
-    }()
-    let font = NSFont.systemFont(ofSize: 10)
-    let attrs: [NSAttributedString.Key: Any] = [
-        .font: font,
-        .foregroundColor: arrowColor,
-    ]
-    let attrStr = NSAttributedString(string: glyph, attributes: attrs)
-    let size = attrStr.size()
-    let x: CGFloat = 11.0   // just after the dot, tucked in tight
-    let y = (height - size.height) / 2.0 - 0.5
-    attrStr.draw(at: NSPoint(x: x, y: y))
+// Arrow tucked against the dot, vertically centered.
+if let arrow = arrowStr {
+    let s = arrow.size()
+    let x = dotEnd + gap
+    let y = (height - s.height) / 2.0 - 0.5
+    arrow.draw(at: NSPoint(x: x, y: y))
 }
 
 image.unlockFocus()
