@@ -9,25 +9,34 @@ case "$ACTION" in
     portal)
         # Force a captive portal to show its login screen.
         #
-        # Strategy: hit the URL macOS itself uses for captive portal
-        # detection (captive.apple.com/hotspot-detect.html). Networks
-        # that want to play nice with Macs *must* intercept this URL,
-        # so it's far more reliable than something generic like
-        # neverssl.com — many portals only hijack well-known detection
-        # endpoints and ignore other HTTP traffic.
+        # Three-pronged strategy to handle different portal behaviors:
         #
-        # Cache-buster query param prevents the browser from serving a
-        # stale "page failed to load" from a previous attempt.
+        # 1. Open the default gateway IP directly. This is the most
+        #    reliable approach because it bypasses DNS entirely — and
+        #    DNS is *frequently* blocked by transit/airport portals
+        #    (confirmed on Caltrain wifi). The gateway is the device
+        #    running the portal, so http://<gateway>/ reaches it
+        #    even when nothing resolves.
         #
-        # If the primary URL doesn't trigger the portal, we also nudge
-        # macOS's Captive Network Assistant in case the OS hasn't
-        # already detected the portal itself.
+        # 2. Also open Apple's captive detection URL with a cache-buster.
+        #    Works when DNS is functional but the network only intercepts
+        #    well-known detection endpoints. macOS uses this URL itself,
+        #    so portals that want to be Mac-friendly will intercept it.
+        #
+        # 3. Best-effort nudge the Captive Network Assistant for cases
+        #    where macOS hasn't yet detected the portal on its own.
         ts=$(date +%s)
+
+        # Method 1: gateway IP (DNS-free, the Caltrain case)
+        gateway=$(route -n get default 2>/dev/null | awk '/gateway:/ {print $2}')
+        if [ -n "$gateway" ]; then
+            open "http://$gateway/?_=$ts"
+        fi
+
+        # Method 2: Apple's captive detection URL (DNS-required fallback)
         open "http://captive.apple.com/hotspot-detect.html?_=$ts"
 
-        # Best-effort: launch Captive Network Assistant. Some macOS
-        # versions only open it when the OS detects a portal itself,
-        # so this is a soft attempt that fails silently if not supported.
+        # Method 3: Captive Network Assistant (silent if unsupported)
         CNA="/System/Library/CoreServices/Captive Network Assistant.app"
         [ -d "$CNA" ] && open -a "$CNA" 2>/dev/null &
         ;;
