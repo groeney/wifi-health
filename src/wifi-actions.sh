@@ -7,10 +7,29 @@ shift
 
 case "$ACTION" in
     portal)
-        # Force a captive portal to show its login screen by loading a
-        # plain-HTTP URL the portal can intercept. neverssl.com is
-        # purpose-built for this — guaranteed never to use HTTPS.
-        open "http://neverssl.com/"
+        # Force a captive portal to show its login screen.
+        #
+        # Strategy: hit the URL macOS itself uses for captive portal
+        # detection (captive.apple.com/hotspot-detect.html). Networks
+        # that want to play nice with Macs *must* intercept this URL,
+        # so it's far more reliable than something generic like
+        # neverssl.com — many portals only hijack well-known detection
+        # endpoints and ignore other HTTP traffic.
+        #
+        # Cache-buster query param prevents the browser from serving a
+        # stale "page failed to load" from a previous attempt.
+        #
+        # If the primary URL doesn't trigger the portal, we also nudge
+        # macOS's Captive Network Assistant in case the OS hasn't
+        # already detected the portal itself.
+        ts=$(date +%s)
+        open "http://captive.apple.com/hotspot-detect.html?_=$ts"
+
+        # Best-effort: launch Captive Network Assistant. Some macOS
+        # versions only open it when the OS detects a portal itself,
+        # so this is a soft attempt that fails silently if not supported.
+        CNA="/System/Library/CoreServices/Captive Network Assistant.app"
+        [ -d "$CNA" ] && open -a "$CNA" 2>/dev/null &
         ;;
 
     reconnect)
