@@ -67,6 +67,7 @@ Checks:
 | `sample_throughput` | Current down/up bytes per second — drives the live activity arrow |
 | `measure_internet_and_latency` | Can you actually reach the internet? What's the latency, jitter, and packet loss? |
 | `measure_captive_portal` | Are you stuck behind a login wall? |
+| `measure_dns_and_https` | Can DNS resolve and HTTPS pages actually load? Catches "ping works but sites won't" failures |
 | `measure_known_nearby` | If on a hotspot — is one of your saved wifi networks in range? |
 | `check_band` | Are you on 2.4GHz when 5GHz would be better? |
 | `check_signal` | Is RSSI too weak? |

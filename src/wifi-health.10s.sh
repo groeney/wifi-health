@@ -43,6 +43,8 @@ PACKET_LOSS=""
 CAPTIVE_DETECTED=0
 PORTAL_BLOCKED=0
 KNOWN_NEARBY=""
+DNS_BROKEN=0
+HTTPS_BROKEN=0
 
 ACT_PORTAL=0
 ACT_RECONNECT=0
@@ -88,6 +90,8 @@ save_state() {
         printf 'CAPTIVE_DETECTED=%s\n'  "$CAPTIVE_DETECTED"
         printf 'PORTAL_BLOCKED=%s\n'    "$PORTAL_BLOCKED"
         printf 'KNOWN_NEARBY=%q\n'      "$KNOWN_NEARBY"
+        printf 'DNS_BROKEN=%s\n'        "$DNS_BROKEN"
+        printf 'HTTPS_BROKEN=%s\n'      "$HTTPS_BROKEN"
     } > "$STATE_FILE"
 }
 
@@ -172,6 +176,53 @@ measure_captive_portal() {
         PORTAL_BLOCKED=1
     elif ! echo "$resp" | grep -q "<TITLE>Success</TITLE>"; then
         CAPTIVE_DETECTED=1
+    fi
+}
+
+measure_dns_and_https() {
+    # Ping reachability and the HTTP-only captive endpoint can both be
+    # fine while DNS or HTTPS are broken — and HTTPS is what actual
+    # websites need. This check catches "green dot but Chrome won't
+    # load anything" scenarios. We probe multiple domains so a single
+    # blocked target doesn't trigger false positives.
+    [ "$NO_INTERNET" -eq 1 ] && return
+    [ "$PORTAL_BLOCKED" -eq 1 ] && return
+    [ "$CAPTIVE_DETECTED" -eq 1 ] && return
+
+    # DNS — try multiple resolvers in case one domain is rate-limited
+    # or blocked. First success wins.
+    local dns_ok=0
+    for d in cloudflare.com google.com apple.com; do
+        if host -W 2 "$d" >/dev/null 2>&1; then
+            dns_ok=1
+            break
+        fi
+    done
+    if [ "$dns_ok" -eq 0 ]; then
+        DNS_BROKEN=1
+        return  # no point probing HTTPS if DNS is dead
+    fi
+
+    # HTTPS — Google's generate_204 returns HTTP 204 with no body and
+    # is purpose-built for connectivity checks. If it returns anything
+    # else (or curl errors), HTTPS is broken.
+    local code
+    code=$(curl -sS --max-time 4 -o /dev/null -w "%{http_code}" \
+        "https://www.google.com/generate_204" 2>/dev/null)
+    if [ "$code" != "204" ]; then
+        HTTPS_BROKEN=1
+    fi
+}
+
+interpret_dns_and_https() {
+    if [ "$DNS_BROKEN" -eq 1 ]; then
+        RECS+=("DNS lookups failing — pages won't load. Try Reconnect wifi")
+        LEVS+=("high")
+        ACT_RECONNECT=1
+    elif [ "$HTTPS_BROKEN" -eq 1 ]; then
+        RECS+=("HTTPS not working — pages won't load. Could be VPN, firewall, or DNS hijack. Try Reconnect wifi")
+        LEVS+=("high")
+        ACT_RECONNECT=1
     fi
 }
 
@@ -271,9 +322,11 @@ if (( NOW - LAST_HEAVY > HEAVY_INTERVAL )); then
     LATENCY_AVG=""; LATENCY_JITTER=""; PACKET_LOSS=""
     CAPTIVE_DETECTED=0; PORTAL_BLOCKED=0
     KNOWN_NEARBY=""
+    DNS_BROKEN=0; HTTPS_BROKEN=0
 
     measure_internet_and_latency
     measure_captive_portal
+    measure_dns_and_https
     measure_known_nearby
     save_state
 fi
@@ -281,6 +334,7 @@ fi
 # Interpretations always run, using fresh or cached measurements.
 interpret_internet_and_latency
 interpret_captive_portal
+interpret_dns_and_https
 interpret_known_nearby
 check_band
 check_signal
@@ -313,6 +367,10 @@ fi
 
 if [ "$NO_INTERNET" -eq 1 ]; then
     COLOR="#F44336"; LABEL="No Internet"; MSG="Connected to wifi but can't reach the web"
+elif [ "$DNS_BROKEN" -eq 1 ]; then
+    COLOR="#F44336"; LABEL="DNS Broken"; MSG="Pings work but DNS lookups are failing — sites won't load"
+elif [ "$HTTPS_BROKEN" -eq 1 ]; then
+    COLOR="#F44336"; LABEL="HTTPS Blocked"; MSG="Pings and DNS work but HTTPS fails — sites won't load"
 elif [ "$QUAL" = "poor" ] && [ "$HIGH" -gt 0 ]; then
     COLOR="#F44336"; LABEL="Needs Attention"; MSG="Real-world performance is bad — clear things to try"
 elif [ "$QUAL" = "poor" ]; then
@@ -408,4 +466,5 @@ fi
 echo "---"
 echo "Run speed test… | shell=\"$ACTIONS\" param1=speed-test terminal=false size=11 color=#888888"
 echo "Wi-Fi settings… | shell=\"$ACTIONS\" param1=settings terminal=false size=11 color=#888888"
+echo "Re-check connectivity now | shell=\"$ACTIONS\" param1=recheck terminal=false refresh=true size=11 color=#888888"
 echo "Refresh | refresh=true size=11 color=#888888"

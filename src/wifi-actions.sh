@@ -66,6 +66,15 @@ case "$ACTION" in
         open "x-apple.systempreferences:com.apple.wifi-settings-extension"
         ;;
 
+    recheck)
+        # Bust the heavy-check cache so the next refresh runs ping,
+        # captive portal, DNS, and HTTPS checks immediately instead of
+        # using the stale cached state. Useful when "the dot says green
+        # but nothing loads" — usually means cached results predate the
+        # connectivity problem.
+        rm -f "$HOME/Library/Application Support/SwiftBar/wifi-health.state"
+        ;;
+
     speed-test)
         # Run Apple's built-in network quality test in a Terminal window
         # so the user can watch progress. Takes 10-20 seconds.
