@@ -11,9 +11,11 @@ PLUGIN_DIR="$HOME/Library/Application Support/SwiftBar/Plugins"
 HELPER_DIR="$HOME/Library/Application Support/SwiftBar"
 
 info "Removing wifi-health plugin…"
-rm -f "$PLUGIN_DIR/wifi-health.5m.sh"
+rm -f "$PLUGIN_DIR/wifi-health.10s.sh"
+rm -f "$PLUGIN_DIR/wifi-health.5m.sh"      # older filename
 rm -f "$HELPER_DIR/wifi-info"
 rm -f "$HELPER_DIR/wifi-actions.sh"
+rm -f "$HELPER_DIR/wifi-health.state"
 
 info "Done. SwiftBar itself was left in place."
 echo "  To also remove SwiftBar: brew uninstall --cask swiftbar"

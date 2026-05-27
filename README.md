@@ -8,7 +8,12 @@ A colored dot sits in your menu bar:
 - **Yellow** — some improvements possible, or weak but nothing actionable
 - **Red** — attention needed, high-impact fixes available
 
-Click the dot for signal metrics, noise levels, and specific recommendations.
+A small arrow (`↓` / `↑` / `⇅`) appears next to the dot when there's
+notable network traffic (>10 KB/s in or out) — so you can tell at a
+glance whether something is actually using the network.
+
+Click the dot for signal metrics, current down/up rates, latency,
+noise levels, and specific recommendations.
 
 ## Install
 
@@ -42,18 +47,26 @@ bash uninstall.sh
 
 ## How it works
 
-The plugin runs every 5 minutes and evaluates your connection against a set of checks:
+The plugin refreshes every 10 seconds, but does the expensive checks
+(ping, captive portal detection, scanning for known networks) at most
+once every 5 minutes. Their results are cached in a small state file
+at `~/Library/Application Support/SwiftBar/wifi-health.state`. Cheap
+work — pulling wifi metrics from CoreWLAN, sampling byte counters for
+the activity meter — runs every cycle.
+
+Checks:
 
 | Check | What it looks at |
 |-------|-----------------|
 | `check_hotspot` | Are you on a personal hotspot? (changes how other checks interpret things) |
-| `check_internet_and_latency` | Can you actually reach the internet? What's the latency, jitter, and packet loss? |
-| `check_captive_portal` | Are you stuck behind a login wall? |
+| `sample_throughput` | Current down/up bytes per second — drives the live activity arrow |
+| `measure_internet_and_latency` | Can you actually reach the internet? What's the latency, jitter, and packet loss? |
+| `measure_captive_portal` | Are you stuck behind a login wall? |
+| `measure_known_nearby` | If on a hotspot — is one of your saved wifi networks in range? |
 | `check_band` | Are you on 2.4GHz when 5GHz would be better? |
 | `check_signal` | Is RSSI too weak? |
 | `check_noise` | Is signal-to-noise ratio poor? |
 | `check_link_speed` | Is the link rate unusually low? |
-| `check_hotspot_advice` | On a hotspot — is performance bad? Is a known wifi network nearby? |
 
 The most important signal is **end-to-end performance** (latency, jitter, packet loss),
 not the wifi link metrics. A great wifi link to a bad upstream — like a hotspot with
@@ -69,7 +82,7 @@ The dropdown shows clickable remediations when they're relevant:
 
 | Action | When it shows | What it does |
 |--------|--------------|--------------|
-| 🔓 **Open login page** | Captive portal detected, or no internet | Opens `neverssl.com` — a plain-HTTP URL that forces captive portals to show their login screen |
+| 🔓 **Open login page** | Captive portal detected, or no internet | Opens `http://<gateway-ip>/` (DNS-free, works even when the portal blocks DNS) plus Apple's captive detection URL as backup |
 | 📶 **Switch to [network]** | On a hotspot with a known wifi network in range | Joins the known network (password comes from keychain) |
 | 🔄 **Reconnect wifi** | No internet, or high packet loss | Toggles wifi off/on — fixes stuck DHCP leases and stale routes |
 | **Run speed test…** | Always available | Runs Apple's `networkQuality` test in Terminal (10-20s) |
@@ -80,7 +93,7 @@ live in `src/wifi-actions.sh` — easy to extend with new remediations.
 
 ## Adding checks
 
-Open `src/wifi-health.5m.sh`. Each check is a bash function that appends
+Open `src/wifi-health.10s.sh`. Each check is a bash function that appends
 to two arrays:
 
 ```bash
