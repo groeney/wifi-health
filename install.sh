@@ -38,14 +38,20 @@ swiftc -O -o "$HELPER_DIR/gen-icon" "$SCRIPT_DIR/src/gen-icon.swift"
 info "Binary → $HELPER_DIR/gen-icon"
 
 # ── Pre-generate menu bar icons ─────────────────────────────────────
-# 3 health colors × 4 activity states = 12 base64 PNGs cached on disk
-# so the plugin script doesn't have to invoke Swift on every refresh.
+# 3 health colors × 1 idle + 3 active states × 6 weight buckets
+# = 57 base64 PNGs. The active-state variants vary the arrow's font
+# weight so the plugin can bump it logarithmically with bandwidth.
 info "Generating menu bar icons…"
 ICONS_DIR="$HELPER_DIR/icons"
 mkdir -p "$ICONS_DIR"
+WEIGHTS=(thin light regular medium semibold bold)
 for color in 4CAF50 FF9800 F44336; do
-    for state in none down up both; do
-        "$HELPER_DIR/gen-icon" "$color" "$state" > "$ICONS_DIR/${color}-${state}.b64"
+    "$HELPER_DIR/gen-icon" "$color" none > "$ICONS_DIR/${color}-none.b64"
+    for state in down up both; do
+        for weight in "${WEIGHTS[@]}"; do
+            "$HELPER_DIR/gen-icon" "$color" "$state" "$weight" \
+                > "$ICONS_DIR/${color}-${state}-${weight}.b64"
+        done
     done
 done
 info "Icons → $ICONS_DIR"

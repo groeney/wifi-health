@@ -390,7 +390,9 @@ else
 fi
 
 # ── Activity glyph for the icon ─────────────────────────────────────
-# Pick which arrow (if any) to render to the right of the dot.
+# Pick which arrow (if any) to render to the right of the dot, then
+# pick a font weight matching the current bandwidth on a log scale —
+# thin for a trickle, bold when the pipe is full.
 ACT_STATE="none"
 ACT_IN=0; ACT_OUT=0
 [ "$BYTES_IN_RATE"  -gt 10240 ] && ACT_IN=1
@@ -403,14 +405,42 @@ elif [ "$ACT_OUT" -eq 1 ]; then
     ACT_STATE="up"
 fi
 
+# The "loudest" direction drives the weight bucket. Roughly one bucket
+# per order of magnitude — thresholds at 50K, 500K, 5M, 50M, 500M B/s.
+ACT_RATE=0
+case "$ACT_STATE" in
+    down) ACT_RATE=$BYTES_IN_RATE ;;
+    up)   ACT_RATE=$BYTES_OUT_RATE ;;
+    both)
+        if [ "$BYTES_IN_RATE" -gt "$BYTES_OUT_RATE" ]; then
+            ACT_RATE=$BYTES_IN_RATE
+        else
+            ACT_RATE=$BYTES_OUT_RATE
+        fi
+        ;;
+esac
+
+WEIGHT="regular"
+if   [ "$ACT_RATE" -ge 524288000 ]; then WEIGHT="bold"      # 500 MB/s+
+elif [ "$ACT_RATE" -ge  52428800 ]; then WEIGHT="semibold"  # 50  MB/s
+elif [ "$ACT_RATE" -ge   5242880 ]; then WEIGHT="medium"    # 5   MB/s
+elif [ "$ACT_RATE" -ge    524288 ]; then WEIGHT="regular"   # 500 KB/s
+elif [ "$ACT_RATE" -ge     51200 ]; then WEIGHT="light"     # 50  KB/s
+else                                     WEIGHT="thin"      # 10–50 KB/s
+fi
+
 # ── Render ──────────────────────────────────────────────────────────
 # Single menu bar item, rendered as an image so the colored dot and
 # gray arrow can share one slot tucked tight together.
 SSID_DISPLAY="$SSID"
 [ "$IS_HOTSPOT" -eq 1 ] && SSID_DISPLAY="$SSID (hotspot)"
 
-ICON_KEY="${COLOR#\#}-$ACT_STATE"
-ICON_FILE="$ICONS_DIR/${ICON_KEY}.b64"
+COLOR_HEX="${COLOR#\#}"
+if [ "$ACT_STATE" = "none" ]; then
+    ICON_FILE="$ICONS_DIR/${COLOR_HEX}-none.b64"
+else
+    ICON_FILE="$ICONS_DIR/${COLOR_HEX}-${ACT_STATE}-${WEIGHT}.b64"
+fi
 if [ -r "$ICON_FILE" ]; then
     echo " | image=$(cat "$ICON_FILE")"
 else

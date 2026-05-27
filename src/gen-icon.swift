@@ -12,12 +12,26 @@ import Foundation
 
 let args = CommandLine.arguments
 guard args.count >= 3 else {
-    FileHandle.standardError.write("usage: gen-icon <RRGGBB> <none|down|up|both>\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: gen-icon <RRGGBB> <none|down|up|both> [weight]\n".data(using: .utf8)!)
     exit(2)
 }
 
-let colorHex = args[1].replacingOccurrences(of: "#", with: "")
-let activity = args[2]
+let colorHex   = args[1].replacingOccurrences(of: "#", with: "")
+let activity   = args[2]
+let weightName = args.count >= 4 ? args[3] : "regular"
+
+let arrowWeight: NSFont.Weight = {
+    switch weightName {
+    case "thin":     return .thin
+    case "light":    return .light
+    case "regular":  return .regular
+    case "medium":   return .medium
+    case "semibold": return .semibold
+    case "bold":     return .bold
+    case "heavy":    return .heavy
+    default:         return .regular
+    }
+}()
 
 func hexColor(_ s: String) -> NSColor {
     let v = UInt32(s, radix: 16) ?? 0
@@ -53,9 +67,10 @@ let glyph: String? = {
     }
 }()
 
-// 9pt — a bit smaller than the original 10pt but readable at menu bar
-// scale (8pt disappeared into the background gray).
-let arrowFont = NSFont.systemFont(ofSize: 9, weight: .medium)
+// 9pt — readable at menu bar scale. Weight is supplied by the caller
+// so the plugin can map traffic rate (log scale) to visual weight:
+// light arrows for trickle, bold arrows when the pipe is full.
+let arrowFont = NSFont.systemFont(ofSize: 9, weight: arrowWeight)
 let arrowAttrs: [NSAttributedString.Key: Any] = [
     .font: arrowFont,
     .foregroundColor: arrowColor,
