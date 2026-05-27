@@ -28,7 +28,8 @@ func hexColor(_ s: String) -> NSColor {
 }
 
 let dotColor   = hexColor(colorHex)
-let arrowColor = NSColor(white: 0.55, alpha: 1.0)
+// Darker gray — 55% was too faint to see clearly at menu bar scale.
+let arrowColor = NSColor(white: 0.40, alpha: 1.0)
 
 // ── Geometry ────────────────────────────────────────────────────────
 // Idle: nothing but the dot, in a canvas just wide enough to contain
@@ -52,7 +53,9 @@ let glyph: String? = {
     }
 }()
 
-let arrowFont = NSFont.systemFont(ofSize: 8)
+// 9pt — a bit smaller than the original 10pt but readable at menu bar
+// scale (8pt disappeared into the background gray).
+let arrowFont = NSFont.systemFont(ofSize: 9, weight: .medium)
 let arrowAttrs: [NSAttributedString.Key: Any] = [
     .font: arrowFont,
     .foregroundColor: arrowColor,
