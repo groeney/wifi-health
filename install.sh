@@ -37,24 +37,15 @@ info "Compiling gen-icon helper…"
 swiftc -O -o "$HELPER_DIR/gen-icon" "$SCRIPT_DIR/src/gen-icon.swift"
 info "Binary → $HELPER_DIR/gen-icon"
 
-# ── Pre-generate menu bar icons ─────────────────────────────────────
-# 3 health colors × 1 idle + 3 active states × 6 weight buckets
-# = 57 base64 PNGs. The active-state variants vary the arrow's font
-# weight so the plugin can bump it logarithmically with bandwidth.
-info "Generating menu bar icons…"
+# ── Icons cache ─────────────────────────────────────────────────────
+# The plugin renders icons on-demand via gen-icon and caches them in
+# this directory keyed by (color, down-level, up-level). Clear stale
+# icons from older formats; the plugin will regenerate as needed.
 ICONS_DIR="$HELPER_DIR/icons"
+info "Resetting icon cache…"
+rm -rf "$ICONS_DIR"
 mkdir -p "$ICONS_DIR"
-WEIGHTS=(thin light regular medium semibold bold)
-for color in 4CAF50 FF9800 F44336; do
-    "$HELPER_DIR/gen-icon" "$color" none > "$ICONS_DIR/${color}-none.b64"
-    for state in down up both; do
-        for weight in "${WEIGHTS[@]}"; do
-            "$HELPER_DIR/gen-icon" "$color" "$state" "$weight" \
-                > "$ICONS_DIR/${color}-${state}-${weight}.b64"
-        done
-    done
-done
-info "Icons → $ICONS_DIR"
+info "Cache → $ICONS_DIR"
 
 # ── Install actions helper ──────────────────────────────────────────
 info "Installing wifi-actions helper…"

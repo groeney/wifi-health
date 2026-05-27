@@ -389,45 +389,34 @@ else
     COLOR="#4CAF50"; LABEL="Good"; MSG="You're good"
 fi
 
-# ── Activity glyph for the icon ─────────────────────────────────────
-# Pick which arrow (if any) to render to the right of the dot, then
-# pick a font weight matching the current bandwidth on a log scale —
-# thin for a trickle, bold when the pipe is full.
-ACT_STATE="none"
-ACT_IN=0; ACT_OUT=0
-[ "$BYTES_IN_RATE"  -gt 10240 ] && ACT_IN=1
-[ "$BYTES_OUT_RATE" -gt 10240 ] && ACT_OUT=1
-if [ "$ACT_IN" -eq 1 ] && [ "$ACT_OUT" -eq 1 ]; then
-    ACT_STATE="both"
-elif [ "$ACT_IN" -eq 1 ]; then
-    ACT_STATE="down"
-elif [ "$ACT_OUT" -eq 1 ]; then
-    ACT_STATE="up"
-fi
+# ── Activity levels for the icon ────────────────────────────────────
+# Each direction (down, up) gets its own level on a log scale of
+# bandwidth. The icon renderer combines them — thin/small arrow for a
+# trickle, big/bold for full pipes — so the menu bar communicates both
+# direction and intensity at a glance.
+#
+#  level   threshold (bytes/sec)
+#   none   < 10K   (arrow hidden)
+#    0     10K  – 50K
+#    1     50K  – 500K
+#    2     500K – 5M
+#    3     5M   – 50M
+#    4     50M  – 500M
+#    5     500M +
+rate_to_level() {
+    local r="$1"
+    if   [ "$r" -ge 524288000 ]; then echo "5"
+    elif [ "$r" -ge  52428800 ]; then echo "4"
+    elif [ "$r" -ge   5242880 ]; then echo "3"
+    elif [ "$r" -ge    524288 ]; then echo "2"
+    elif [ "$r" -ge     51200 ]; then echo "1"
+    elif [ "$r" -ge     10240 ]; then echo "0"
+    else                              echo "none"
+    fi
+}
 
-# The "loudest" direction drives the weight bucket. Roughly one bucket
-# per order of magnitude — thresholds at 50K, 500K, 5M, 50M, 500M B/s.
-ACT_RATE=0
-case "$ACT_STATE" in
-    down) ACT_RATE=$BYTES_IN_RATE ;;
-    up)   ACT_RATE=$BYTES_OUT_RATE ;;
-    both)
-        if [ "$BYTES_IN_RATE" -gt "$BYTES_OUT_RATE" ]; then
-            ACT_RATE=$BYTES_IN_RATE
-        else
-            ACT_RATE=$BYTES_OUT_RATE
-        fi
-        ;;
-esac
-
-WEIGHT="regular"
-if   [ "$ACT_RATE" -ge 524288000 ]; then WEIGHT="bold"      # 500 MB/s+
-elif [ "$ACT_RATE" -ge  52428800 ]; then WEIGHT="semibold"  # 50  MB/s
-elif [ "$ACT_RATE" -ge   5242880 ]; then WEIGHT="medium"    # 5   MB/s
-elif [ "$ACT_RATE" -ge    524288 ]; then WEIGHT="regular"   # 500 KB/s
-elif [ "$ACT_RATE" -ge     51200 ]; then WEIGHT="light"     # 50  KB/s
-else                                     WEIGHT="thin"      # 10–50 KB/s
-fi
+DOWN_LEVEL=$(rate_to_level "$BYTES_IN_RATE")
+UP_LEVEL=$(rate_to_level "$BYTES_OUT_RATE")
 
 # ── Render ──────────────────────────────────────────────────────────
 # Single menu bar item, rendered as an image so the colored dot and
@@ -436,15 +425,19 @@ SSID_DISPLAY="$SSID"
 [ "$IS_HOTSPOT" -eq 1 ] && SSID_DISPLAY="$SSID (hotspot)"
 
 COLOR_HEX="${COLOR#\#}"
-if [ "$ACT_STATE" = "none" ]; then
-    ICON_FILE="$ICONS_DIR/${COLOR_HEX}-none.b64"
-else
-    ICON_FILE="$ICONS_DIR/${COLOR_HEX}-${ACT_STATE}-${WEIGHT}.b64"
+ICON_FILE="$ICONS_DIR/${COLOR_HEX}-d${DOWN_LEVEL}-u${UP_LEVEL}.b64"
+# Lazy cache: render on first encounter, then reuse forever.
+if [ ! -r "$ICON_FILE" ]; then
+    mkdir -p "$ICONS_DIR"
+    if [ -x "$HELPER_DIR/gen-icon" ]; then
+        "$HELPER_DIR/gen-icon" "$COLOR_HEX" "$DOWN_LEVEL" "$UP_LEVEL" \
+            > "$ICON_FILE" 2>/dev/null
+    fi
 fi
-if [ -r "$ICON_FILE" ]; then
+if [ -r "$ICON_FILE" ] && [ -s "$ICON_FILE" ]; then
     echo " | image=$(cat "$ICON_FILE")"
 else
-    # Fallback if icons weren't generated — just the dot, no arrow.
+    # Fallback — gen-icon missing or failed.
     echo "● | size=14 color=$COLOR"
 fi
 echo "---"

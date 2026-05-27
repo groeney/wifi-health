@@ -1,93 +1,97 @@
 // gen-icon.swift — render the wifi-health menu bar icon.
 //
-// Usage: gen-icon <RRGGBB> <none|down|up|both>
-// Outputs a base64-encoded PNG to stdout.
+// Usage: gen-icon <RRGGBB> <down-level> <up-level>
+//   down-level / up-level: "none" (no arrow) or "0".."5"
 //
-// Layout: a small colored dot on the left, optional gray arrow tucked
-// in close to its right. Single image so the two glyphs stay flush
-// regardless of macOS menu bar inter-item spacing.
+// Level maps to (size, weight) jointly so both axes carry information:
+//   0 → 7pt thin           4 → 11pt semibold
+//   1 → 8pt light          5 → 12pt bold
+//   2 → 9pt regular
+//   3 → 10pt medium
+//
+// Layout: colored dot, then optional ↓, then optional ↑. Canvas width
+// sized exactly to what's drawn so we waste no menu bar pixels.
+// Outputs a base64-encoded PNG to stdout.
 
 import AppKit
 import Foundation
 
 let args = CommandLine.arguments
-guard args.count >= 3 else {
-    FileHandle.standardError.write("usage: gen-icon <RRGGBB> <none|down|up|both> [weight]\n".data(using: .utf8)!)
+guard args.count >= 4 else {
+    FileHandle.standardError.write(
+        "usage: gen-icon <RRGGBB> <down-level> <up-level>\n".data(using: .utf8)!
+    )
     exit(2)
 }
 
-let colorHex   = args[1].replacingOccurrences(of: "#", with: "")
-let activity   = args[2]
-let weightName = args.count >= 4 ? args[3] : "regular"
+let colorHex = args[1].replacingOccurrences(of: "#", with: "")
+let downArg  = args[2]
+let upArg    = args[3]
 
-let arrowWeight: NSFont.Weight = {
-    switch weightName {
-    case "thin":     return .thin
-    case "light":    return .light
-    case "regular":  return .regular
-    case "medium":   return .medium
-    case "semibold": return .semibold
-    case "bold":     return .bold
-    case "heavy":    return .heavy
-    default:         return .regular
-    }
-}()
+// One spec per level. (size, weight) move together — bigger AND bolder
+// as bandwidth grows, so the difference between L0 and L5 is striking.
+let levelSpecs: [(size: CGFloat, weight: NSFont.Weight)] = [
+    ( 7, .thin),       // L0  10–50  KB/s
+    ( 8, .light),      // L1  50–500 KB/s
+    ( 9, .regular),    // L2  500K–5  MB/s
+    (10, .medium),     // L3   5–50  MB/s
+    (11, .semibold),   // L4  50–500 MB/s
+    (12, .bold),       // L5  500MB+
+]
+
+func parseLevel(_ s: String) -> (CGFloat, NSFont.Weight)? {
+    if s == "none" { return nil }
+    guard let i = Int(s), i >= 0, i < levelSpecs.count else { return nil }
+    return levelSpecs[i]
+}
+
+let downSpec = parseLevel(downArg)
+let upSpec   = parseLevel(upArg)
 
 func hexColor(_ s: String) -> NSColor {
     let v = UInt32(s, radix: 16) ?? 0
-    let r = CGFloat((v >> 16) & 0xFF) / 255.0
-    let g = CGFloat((v >> 8)  & 0xFF) / 255.0
-    let b = CGFloat( v        & 0xFF) / 255.0
-    return NSColor(red: r, green: g, blue: b, alpha: 1.0)
+    return NSColor(
+        red:   CGFloat((v >> 16) & 0xFF) / 255.0,
+        green: CGFloat((v >> 8)  & 0xFF) / 255.0,
+        blue:  CGFloat( v        & 0xFF) / 255.0,
+        alpha: 1.0
+    )
 }
 
 let dotColor   = hexColor(colorHex)
-// Darker gray — 55% was too faint to see clearly at menu bar scale.
 let arrowColor = NSColor(white: 0.40, alpha: 1.0)
 
 // ── Geometry ────────────────────────────────────────────────────────
-// Idle: nothing but the dot, in a canvas just wide enough to contain
-// it. Active: dot + a small arrow tucked flush against it. Width grows
-// only as much as the glyph needs so we waste no menu bar pixels.
-let height:     CGFloat = 14
-let leftPad:    CGFloat = 1
-let dotSize:    CGFloat = 9
-let dotEnd:     CGFloat = leftPad + dotSize    // 10
-let gap:        CGFloat = 1
-let rightPad:   CGFloat = 1
+let height:   CGFloat = 14
+let leftPad:  CGFloat = 1
+let dotSize:  CGFloat = 9
+let dotEnd:   CGFloat = leftPad + dotSize  // 10
+let gap:      CGFloat = 1                   // dot → first arrow
+let arrowGap: CGFloat = 1                   // ↓ → ↑
+let rightPad: CGFloat = 1
 
-// Pick the arrow glyph. ↕ (U+2195) is a single character for "both"
-// directions — narrower and clearer at small sizes than ⇅.
-let glyph: String? = {
-    switch activity {
-    case "down": return "↓"
-    case "up":   return "↑"
-    case "both": return "↕"
-    default:     return nil
-    }
-}()
-
-// 9pt — readable at menu bar scale. Weight is supplied by the caller
-// so the plugin can map traffic rate (log scale) to visual weight:
-// light arrows for trickle, bold arrows when the pipe is full.
-let arrowFont = NSFont.systemFont(ofSize: 9, weight: arrowWeight)
-let arrowAttrs: [NSAttributedString.Key: Any] = [
-    .font: arrowFont,
-    .foregroundColor: arrowColor,
-]
-
-// Measure the glyph so the canvas width can be exact.
-var arrowWidth: CGFloat = 0
-var arrowStr: NSAttributedString? = nil
-if let g = glyph {
-    let s = NSAttributedString(string: g, attributes: arrowAttrs)
-    arrowStr  = s
-    arrowWidth = ceil(s.size().width)
+func attrString(_ glyph: String, _ spec: (CGFloat, NSFont.Weight)) -> NSAttributedString {
+    NSAttributedString(string: glyph, attributes: [
+        .font: NSFont.systemFont(ofSize: spec.0, weight: spec.1),
+        .foregroundColor: arrowColor,
+    ])
 }
 
-let width: CGFloat = glyph == nil
-    ? dotEnd + rightPad                       // idle: 11pt
-    : dotEnd + gap + arrowWidth + rightPad    // active: tight to glyph
+let downStr = downSpec.map { attrString("↓", $0) }
+let upStr   = upSpec.map   { attrString("↑", $0) }
+
+let downWidth: CGFloat = downStr.map { ceil($0.size().width) } ?? 0
+let upWidth:   CGFloat = upStr.map   { ceil($0.size().width) } ?? 0
+
+// Canvas exactly fits what's drawn — no dead pixels on either side.
+var width: CGFloat = dotEnd + rightPad
+if downSpec != nil && upSpec != nil {
+    width = dotEnd + gap + downWidth + arrowGap + upWidth + rightPad
+} else if downSpec != nil {
+    width = dotEnd + gap + downWidth + rightPad
+} else if upSpec != nil {
+    width = dotEnd + gap + upWidth + rightPad
+}
 
 let image = NSImage(size: NSSize(width: width, height: height))
 image.lockFocus()
@@ -107,12 +111,13 @@ let dotRect = NSRect(
 dotColor.setFill()
 NSBezierPath(ovalIn: dotRect).fill()
 
-// Arrow tucked against the dot, vertically centered.
-if let arrow = arrowStr {
-    let s = arrow.size()
-    let x = dotEnd + gap
+// Arrows in order: ↓ then ↑.
+var x = dotEnd + gap
+for str in [downStr, upStr].compactMap({ $0 }) {
+    let s = str.size()
     let y = (height - s.height) / 2.0 - 0.5
-    arrow.draw(at: NSPoint(x: x, y: y))
+    str.draw(at: NSPoint(x: x, y: y))
+    x += ceil(s.width) + arrowGap
 }
 
 image.unlockFocus()
