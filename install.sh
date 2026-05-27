@@ -39,15 +39,20 @@ cp "$SCRIPT_DIR/src/wifi-actions.sh" "$HELPER_DIR/wifi-actions.sh"
 chmod +x "$HELPER_DIR/wifi-actions.sh"
 info "Actions → $HELPER_DIR/wifi-actions.sh"
 
-# ── Install plugin ──────────────────────────────────────────────────
-info "Installing SwiftBar plugin…"
+# ── Install plugins ─────────────────────────────────────────────────
+info "Installing SwiftBar plugins…"
 mkdir -p "$PLUGIN_DIR"
 # Clean up any older filenames from previous versions (the refresh
 # interval is encoded in the filename, so a rename leaves an orphan).
 rm -f "$PLUGIN_DIR/wifi-health.5m.sh" "$PLUGIN_DIR/wifi-health.1m.sh"
+
 cp "$SCRIPT_DIR/src/wifi-health.10s.sh" "$PLUGIN_DIR/wifi-health.10s.sh"
 chmod +x "$PLUGIN_DIR/wifi-health.10s.sh"
 info "Plugin → $PLUGIN_DIR/wifi-health.10s.sh"
+
+cp "$SCRIPT_DIR/src/wifi-activity.5s.sh" "$PLUGIN_DIR/wifi-activity.5s.sh"
+chmod +x "$PLUGIN_DIR/wifi-activity.5s.sh"
+info "Plugin → $PLUGIN_DIR/wifi-activity.5s.sh"
 
 # ── Set SwiftBar plugin directory ───────────────────────────────────
 defaults write com.ameba.SwiftBar PluginDirectory "$PLUGIN_DIR"

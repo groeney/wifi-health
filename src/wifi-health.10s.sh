@@ -47,36 +47,10 @@ ACT_PORTAL=0
 ACT_RECONNECT=0
 ACT_SWITCH=""
 
-BYTES_IN_RATE=0
-BYTES_OUT_RATE=0
-
 LAST_HEAVY=0
 [ -f "$STATE_FILE" ] && . "$STATE_FILE"
 
 # ── Helpers ─────────────────────────────────────────────────────────
-format_rate() {
-    # Bytes/sec → compact string: "0B", "12K", "1.2M", "1.2G".
-    awk -v b="$1" 'BEGIN {
-        if (b < 1024)             printf "%dB", b
-        else if (b < 1048576)     printf "%dK", b/1024 + 0.5
-        else if (b < 1073741824)  printf "%.1fM", b/1048576
-        else                      printf "%.1fG", b/1073741824
-    }'
-}
-
-sample_throughput() {
-    # Two byte-counter samples one second apart → instantaneous rate.
-    # netstat -bI columns: Name Mtu Net Addr Ipkts Ierrs Ibytes Opkts Oerrs Obytes Coll
-    local in1 out1 in2 out2
-    read -r in1 out1 < <(netstat -bI en0 2>/dev/null | awk '$1=="en0" {print $7, $10; exit}')
-    sleep 1
-    read -r in2 out2 < <(netstat -bI en0 2>/dev/null | awk '$1=="en0" {print $7, $10; exit}')
-    BYTES_IN_RATE=$(( in2 - in1 ))
-    BYTES_OUT_RATE=$(( out2 - out1 ))
-    [ "$BYTES_IN_RATE"  -lt 0 ] && BYTES_IN_RATE=0
-    [ "$BYTES_OUT_RATE" -lt 0 ] && BYTES_OUT_RATE=0
-}
-
 save_state() {
     # Persist the heavy-check results so the next refresh can use them.
     # printf %q on KNOWN_NEARBY handles spaces and apostrophes safely.
@@ -262,7 +236,6 @@ check_link_speed() {
 
 # ── Run checks ──────────────────────────────────────────────────────
 check_hotspot
-sample_throughput
 
 NOW=$(date +%s)
 if (( NOW - LAST_HEAVY > HEAVY_INTERVAL )); then
@@ -332,35 +305,17 @@ else
     COLOR="#4CAF50"; LABEL="Good"; MSG="You're good"
 fi
 
-# ── Activity indicator ──────────────────────────────────────────────
-# Small arrow next to the dot when there's notable traffic (>10 KB/s).
-# Idle traffic (keepalives, dns) stays out of view so the menu bar
-# doesn't constantly twitch.
-ACT_GLYPH=""
-ACT_IN=0; ACT_OUT=0
-[ "$BYTES_IN_RATE"  -gt 10240 ] && ACT_IN=1
-[ "$BYTES_OUT_RATE" -gt 10240 ] && ACT_OUT=1
-if [ "$ACT_IN" -eq 1 ] && [ "$ACT_OUT" -eq 1 ]; then
-    ACT_GLYPH=" ⇅"
-elif [ "$ACT_IN" -eq 1 ]; then
-    ACT_GLYPH=" ↓"
-elif [ "$ACT_OUT" -eq 1 ]; then
-    ACT_GLYPH=" ↑"
-fi
-
 # ── Render ──────────────────────────────────────────────────────────
+# The colored dot is health-only. The activity arrow lives in the
+# separate wifi-activity.5s.sh plugin (smaller, gray, ambient FYI).
 SSID_DISPLAY="$SSID"
 [ "$IS_HOTSPOT" -eq 1 ] && SSID_DISPLAY="$SSID (hotspot)"
 
-echo "●${ACT_GLYPH} | size=14 color=$COLOR"
+echo "● | size=14 color=$COLOR"
 echo "---"
 echo "$SSID_DISPLAY — $LABEL | size=13"
 echo "$MSG | size=11 color=#888888"
 echo "---"
-RATE_IN=$(format_rate "$BYTES_IN_RATE")
-RATE_OUT=$(format_rate "$BYTES_OUT_RATE")
-echo "↓ Down:      ${RATE_IN}/s | font=Menlo size=11"
-echo "↑ Up:        ${RATE_OUT}/s | font=Menlo size=11"
 if [ -n "$LATENCY_AVG" ]; then
     echo "Latency:     ${LATENCY_AVG} ms (±${LATENCY_JITTER}) | font=Menlo size=11"
     echo "Loss:        ${PACKET_LOSS}% | font=Menlo size=11"

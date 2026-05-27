@@ -2,18 +2,20 @@
 
 A macOS menu bar widget that shows your wifi connection quality at a glance.
 
-A colored dot sits in your menu bar:
+Two small items sit in your menu bar:
 
-- **Green** — you're good, nothing to fix
-- **Yellow** — some improvements possible, or weak but nothing actionable
-- **Red** — attention needed, high-impact fixes available
+- **`●`** (the health dot) — green / yellow / red:
+  - **Green** — you're good, nothing to fix
+  - **Yellow** — some improvements possible, or weak but nothing actionable
+  - **Red** — attention needed, high-impact fixes available
+- **`↓ ↑ ⇅ ·`** (the activity meter, in a muted gray) — shows current
+  network traffic at a glance. The arrow appears when traffic exceeds
+  10 KB/s in a direction; otherwise a tiny middle dot indicates the
+  meter is alive but quiet.
 
-A small arrow (`↓` / `↑` / `⇅`) appears next to the dot when there's
-notable network traffic (>10 KB/s in or out) — so you can tell at a
-glance whether something is actually using the network.
-
-Click the dot for signal metrics, current down/up rates, latency,
-noise levels, and specific recommendations.
+Click either item for details. The health dot's dropdown has signal
+metrics, latency, noise, and remediations; the activity item's dropdown
+shows current down/up rates.
 
 ## Install
 

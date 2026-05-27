@@ -10,8 +10,9 @@ info() { echo -e "${BOLD}${GREEN}▸${RESET} $1"; }
 PLUGIN_DIR="$HOME/Library/Application Support/SwiftBar/Plugins"
 HELPER_DIR="$HOME/Library/Application Support/SwiftBar"
 
-info "Removing wifi-health plugin…"
+info "Removing wifi-health plugins…"
 rm -f "$PLUGIN_DIR/wifi-health.10s.sh"
+rm -f "$PLUGIN_DIR/wifi-activity.5s.sh"
 rm -f "$PLUGIN_DIR/wifi-health.5m.sh"      # older filename
 rm -f "$HELPER_DIR/wifi-info"
 rm -f "$HELPER_DIR/wifi-actions.sh"
