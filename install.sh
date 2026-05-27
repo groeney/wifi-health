@@ -27,11 +27,28 @@ else
     info "SwiftBar already installed"
 fi
 
-# ── Compile wifi-info helper ────────────────────────────────────────
+# ── Compile Swift helpers ───────────────────────────────────────────
 info "Compiling wifi-info helper…"
 mkdir -p "$HELPER_DIR"
 swiftc -O -o "$HELPER_DIR/wifi-info" "$SCRIPT_DIR/src/wifi-info.swift"
 info "Binary → $HELPER_DIR/wifi-info"
+
+info "Compiling gen-icon helper…"
+swiftc -O -o "$HELPER_DIR/gen-icon" "$SCRIPT_DIR/src/gen-icon.swift"
+info "Binary → $HELPER_DIR/gen-icon"
+
+# ── Pre-generate menu bar icons ─────────────────────────────────────
+# 3 health colors × 4 activity states = 12 base64 PNGs cached on disk
+# so the plugin script doesn't have to invoke Swift on every refresh.
+info "Generating menu bar icons…"
+ICONS_DIR="$HELPER_DIR/icons"
+mkdir -p "$ICONS_DIR"
+for color in 4CAF50 FF9800 F44336; do
+    for state in none down up both; do
+        "$HELPER_DIR/gen-icon" "$color" "$state" > "$ICONS_DIR/${color}-${state}.b64"
+    done
+done
+info "Icons → $ICONS_DIR"
 
 # ── Install actions helper ──────────────────────────────────────────
 info "Installing wifi-actions helper…"
@@ -39,20 +56,17 @@ cp "$SCRIPT_DIR/src/wifi-actions.sh" "$HELPER_DIR/wifi-actions.sh"
 chmod +x "$HELPER_DIR/wifi-actions.sh"
 info "Actions → $HELPER_DIR/wifi-actions.sh"
 
-# ── Install plugins ─────────────────────────────────────────────────
-info "Installing SwiftBar plugins…"
+# ── Install plugin ──────────────────────────────────────────────────
+info "Installing SwiftBar plugin…"
 mkdir -p "$PLUGIN_DIR"
-# Clean up any older filenames from previous versions (the refresh
-# interval is encoded in the filename, so a rename leaves an orphan).
+# Clean up older filenames from previous versions (filename encodes
+# refresh interval, so renames leave orphans).
 rm -f "$PLUGIN_DIR/wifi-health.5m.sh" "$PLUGIN_DIR/wifi-health.1m.sh"
+rm -f "$PLUGIN_DIR/wifi-activity.5s.sh"  # merged into wifi-health
 
 cp "$SCRIPT_DIR/src/wifi-health.10s.sh" "$PLUGIN_DIR/wifi-health.10s.sh"
 chmod +x "$PLUGIN_DIR/wifi-health.10s.sh"
 info "Plugin → $PLUGIN_DIR/wifi-health.10s.sh"
-
-cp "$SCRIPT_DIR/src/wifi-activity.5s.sh" "$PLUGIN_DIR/wifi-activity.5s.sh"
-chmod +x "$PLUGIN_DIR/wifi-activity.5s.sh"
-info "Plugin → $PLUGIN_DIR/wifi-activity.5s.sh"
 
 # ── Set SwiftBar plugin directory ───────────────────────────────────
 defaults write com.ameba.SwiftBar PluginDirectory "$PLUGIN_DIR"

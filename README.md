@@ -2,20 +2,23 @@
 
 A macOS menu bar widget that shows your wifi connection quality at a glance.
 
-Two small items sit in your menu bar:
+A small icon sits in your menu bar:
 
-- **`●`** (the health dot) — green / yellow / red:
+- The **colored dot** shows connection health:
   - **Green** — you're good, nothing to fix
   - **Yellow** — some improvements possible, or weak but nothing actionable
   - **Red** — attention needed, high-impact fixes available
-- **`↓ ↑ ⇅ ·`** (the activity meter, in a muted gray) — shows current
-  network traffic at a glance. The arrow appears when traffic exceeds
-  10 KB/s in a direction; otherwise a tiny middle dot indicates the
-  meter is alive but quiet.
+- A **muted gray arrow** (`↓` / `↑` / `⇅`) is tucked next to the dot when
+  there's notable network traffic (>10 KB/s in or out). Nothing appears
+  next to the dot when the network is idle.
 
-Click either item for details. The health dot's dropdown has signal
-metrics, latency, noise, and remediations; the activity item's dropdown
-shows current down/up rates.
+The icon is rendered as a single PNG (generated at install time, twelve
+variants total) so the colored dot and gray arrow share one menu bar
+slot and stay flush together regardless of SwiftBar's inter-item
+spacing.
+
+Click the icon for signal metrics, current down/up rates, latency,
+noise levels, and specific recommendations.
 
 ## Install
 
