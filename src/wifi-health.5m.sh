@@ -35,20 +35,96 @@ SNR=$((RSSI - NOISE))
 RECS=()
 LEVS=()
 NO_INTERNET=0
+IS_HOTSPOT=0
+LATENCY_AVG=""
+LATENCY_JITTER=""
+PACKET_LOSS=""
 
-check_internet() {
-    # The most important check: can we actually reach the internet?
-    # A strong wifi link means nothing if there's no connectivity behind it.
-    # Try ping first (fast), fall back to TCP (works when ICMP is blocked).
-    if ping -c 1 -W 3 1.1.1.1 >/dev/null 2>&1; then
+check_hotspot() {
+    # Heuristic SSID match for personal hotspots — names like
+    # "James's iPhone", "Pixel 8", "Galaxy S23", "Mike's Hotspot".
+    case "$SSID" in
+        *iPhone*|*iPad*|*Android*|*Pixel*|*Galaxy*|*Mobile*|*hotspot*|*Hotspot*|*HOTSPOT*)
+            IS_HOTSPOT=1
+            ;;
+    esac
+}
+
+check_internet_and_latency() {
+    # Combined reachability + quality check. Five rapid pings give us:
+    #   - Is the internet reachable? (any reply at all)
+    #   - Latency average
+    #   - Jitter (stddev — smoothest measure of variation)
+    #   - Packet loss
+    # This is the most important signal in the whole script: a great
+    # wifi link to a bad upstream (hotspot with weak LTE, congested
+    # cafe wifi, etc.) lies through its teeth on link metrics alone.
+    local out loss stats avg stddev
+    out=$(ping -c 5 -i 0.2 -W 1 1.1.1.1 2>/dev/null)
+
+    # macOS ping with -i 0.2 only prints the summary (sub-second
+    # intervals need root for per-packet output), so we look for the
+    # "packets transmitted" line to confirm ping actually ran.
+    if [ -z "$out" ] || ! echo "$out" | grep -q "packets transmitted"; then
+        # Ping totally failed — try TCP for reachability.
+        if nc -z -w 3 1.1.1.1 443 2>/dev/null; then
+            return  # TCP works but ICMP blocked — can't measure latency
+        fi
+        NO_INTERNET=1
+        RECS+=("No internet — try a hotspot, sign in to the network, or find another connection")
+        LEVS+=("high")
         return
     fi
-    if nc -z -w 3 1.1.1.1 443 2>/dev/null; then
+
+    loss=$(echo "$out" | awk -F'[%]' '/packet loss/ {print $1}' | awk '{print $NF}')
+    loss=${loss:-100}
+    loss=${loss%.*}  # strip any decimal
+
+    # 100% loss means no connectivity even though ping ran.
+    if [ "$loss" -eq 100 ] 2>/dev/null; then
+        NO_INTERNET=1
+        RECS+=("No internet — try a hotspot, sign in to the network, or find another connection")
+        LEVS+=("high")
         return
     fi
-    NO_INTERNET=1
-    RECS+=("No internet — try a hotspot, sign in to the network, or find another connection")
-    LEVS+=("high")
+
+    stats=$(echo "$out" | grep -E 'min/avg/max')
+    # Format: round-trip min/avg/max/stddev = 21.3/27.6/39.7/5.1 ms
+    avg=$(echo "$stats" | awk -F'=' '{print $2}' | awk -F'/' '{print $2}' | cut -d. -f1)
+    stddev=$(echo "$stats" | awk -F'=' '{print $2}' | awk -F'/' '{print $4}' | cut -d. -f1)
+    avg=${avg:-0}
+    stddev=${stddev:-0}
+
+    LATENCY_AVG=$avg
+    LATENCY_JITTER=$stddev
+    PACKET_LOSS=$loss
+
+    # Packet loss
+    if [ "$loss" -gt 10 ] 2>/dev/null; then
+        RECS+=("High packet loss (${loss}%) — connection is unreliable")
+        LEVS+=("high")
+    elif [ "$loss" -gt 2 ] 2>/dev/null; then
+        RECS+=("Some packet loss (${loss}%)")
+        LEVS+=("medium")
+    fi
+
+    # Latency
+    if [ "$avg" -gt 150 ] 2>/dev/null; then
+        RECS+=("Very high latency (${avg}ms) — calls and pages will be sluggish")
+        LEVS+=("high")
+    elif [ "$avg" -gt 60 ] 2>/dev/null; then
+        RECS+=("Elevated latency (${avg}ms)")
+        LEVS+=("medium")
+    fi
+
+    # Jitter
+    if [ "$stddev" -gt 50 ] 2>/dev/null; then
+        RECS+=("High jitter (±${stddev}ms) — bad for video calls and gaming")
+        LEVS+=("high")
+    elif [ "$stddev" -gt 20 ] 2>/dev/null; then
+        RECS+=("Moderate jitter (±${stddev}ms)")
+        LEVS+=("medium")
+    fi
 }
 
 check_captive_portal() {
@@ -98,6 +174,9 @@ check_noise() {
 }
 
 check_link_speed() {
+    # Skip link speed checks on hotspots — link rate to the phone is
+    # almost always fast and tells us nothing about actual throughput.
+    [ "$IS_HOTSPOT" -eq 1 ] && return
     if [ "$TX_RATE" -lt 50 ] 2>/dev/null; then
         RECS+=("Link speed very low (${TX_RATE} Mbps) — check router or band")
         LEVS+=("high")
@@ -107,15 +186,52 @@ check_link_speed() {
     fi
 }
 
+check_hotspot_advice() {
+    [ "$IS_HOTSPOT" -ne 1 ] && return
+    # On a hotspot, the real bottleneck is the phone's cellular signal,
+    # not the wifi link. Add a contextual hint if performance is bad.
+    if [ -n "$LATENCY_AVG" ] && [ "$LATENCY_AVG" -gt 80 ] 2>/dev/null; then
+        RECS+=("On a hotspot — speed is capped by your phone's cellular signal, try moving it nearer a window")
+        LEVS+=("medium")
+    fi
+    # Suggest switching to known wifi if any are nearby.
+    local preferred nearby match
+    preferred=$(networksetup -listpreferredwirelessnetworks en0 2>/dev/null | tail -n +2 | sed 's/^[[:space:]]*//')
+    if [ -n "$preferred" ]; then
+        # Cached scan of currently visible networks (no fresh scan to keep it fast).
+        nearby=$(system_profiler SPAirPortDataType 2>/dev/null | awk '
+            /Other Local Wi-Fi Networks:/ {flag=1; next}
+            /^[[:space:]]{8}[A-Z]/ {flag=0}
+            flag && /^[[:space:]]{12}[^[:space:]]/ {gsub(/:$/, ""); gsub(/^[[:space:]]+/, ""); print}
+        ' | sort -u)
+        if [ -n "$nearby" ]; then
+            while IFS= read -r net; do
+                [ -z "$net" ] && continue
+                [ "$net" = "$SSID" ] && continue
+                if echo "$nearby" | grep -qFx "$net"; then
+                    match="$net"
+                    break
+                fi
+            done <<< "$preferred"
+            if [ -n "$match" ]; then
+                RECS+=("Known network '$match' is in range — switch for likely better speeds")
+                LEVS+=("high")
+            fi
+        fi
+    fi
+}
+
 # ── Run all checks ──────────────────────────────────────────────────
-# Internet reachability runs first — it's the most important signal.
-# Add new check_* calls here:
-check_internet
+# Order matters: hotspot detection first (others reference IS_HOTSPOT),
+# then reachability+latency (the highest-signal check), then link.
+check_hotspot
+check_internet_and_latency
 check_captive_portal
 check_band
 check_signal
 check_noise
 check_link_speed
+check_hotspot_advice
 
 # ── Score ───────────────────────────────────────────────────────────
 HIGH=0
@@ -125,6 +241,7 @@ for lev in "${LEVS[@]}"; do
     [ "$lev" = "medium" ] && ((MED++))
 done
 
+# Link-layer signal quality
 if [ "$RSSI" -gt -60 ] && [ "$SNR" -gt 25 ] 2>/dev/null; then
     SIG="good"
 elif [ "$RSSI" -gt -72 ] && [ "$SNR" -gt 15 ] 2>/dev/null; then
@@ -133,14 +250,30 @@ else
     SIG="poor"
 fi
 
+# End-to-end quality from ping. Empty values mean we couldn't measure
+# (e.g. ICMP blocked) — treat as "ok" rather than poor.
+QUAL="ok"
+if [ -n "$LATENCY_AVG" ] && [ -n "$PACKET_LOSS" ]; then
+    if [ "$PACKET_LOSS" -le 1 ] 2>/dev/null && [ "$LATENCY_AVG" -lt 50 ] 2>/dev/null && [ "${LATENCY_JITTER:-0}" -lt 15 ] 2>/dev/null; then
+        QUAL="good"
+    elif [ "$PACKET_LOSS" -gt 10 ] 2>/dev/null || [ "$LATENCY_AVG" -gt 200 ] 2>/dev/null; then
+        QUAL="poor"
+    fi
+fi
+
 # ── Color logic ─────────────────────────────────────────────────────
-# No internet trumps everything — it's always RED.
-# GREEN  — connection is solid, nothing to fix
-# YELLOW — some improvements possible, or weak but nothing actionable
-# RED    — no internet, or poor + clear things you can fix right now
+# Priority order:
+#   1. No internet → RED
+#   2. Actually-broken connection (poor end-to-end quality + fixes) → RED
+#   3. High-leverage fixes available → YELLOW
+#   4. Everything good → GREEN
 if [ "$NO_INTERNET" -eq 1 ]; then
     COLOR="#F44336"; LABEL="No Internet"; MSG="Connected to wifi but can't reach the web"
-elif [ "$SIG" = "good" ] && [ "$HIGH" -eq 0 ] && [ "$MED" -eq 0 ]; then
+elif [ "$QUAL" = "poor" ] && [ "$HIGH" -gt 0 ]; then
+    COLOR="#F44336"; LABEL="Needs Attention"; MSG="Real-world performance is bad — clear things to try"
+elif [ "$QUAL" = "poor" ]; then
+    COLOR="#FF9800"; LABEL="Slow"; MSG="Connection feels slow — limited options to improve"
+elif [ "$SIG" = "good" ] && [ "$QUAL" = "good" ] && [ "$HIGH" -eq 0 ] && [ "$MED" -eq 0 ]; then
     COLOR="#4CAF50"; LABEL="Good"; MSG="You're good"
 elif [ "$HIGH" -gt 0 ] && [ "$SIG" = "poor" ]; then
     COLOR="#F44336"; LABEL="Needs Attention"; MSG="You can really improve your connection"
@@ -155,11 +288,18 @@ else
 fi
 
 # ── Render ──────────────────────────────────────────────────────────
+SSID_DISPLAY="$SSID"
+[ "$IS_HOTSPOT" -eq 1 ] && SSID_DISPLAY="$SSID (hotspot)"
+
 echo "● | size=14 color=$COLOR"
 echo "---"
-echo "$SSID — $LABEL | size=13"
+echo "$SSID_DISPLAY — $LABEL | size=13"
 echo "$MSG | size=11 color=#888888"
 echo "---"
+if [ -n "$LATENCY_AVG" ]; then
+    echo "Latency:     ${LATENCY_AVG} ms (±${LATENCY_JITTER}) | font=Menlo size=11"
+    echo "Loss:        ${PACKET_LOSS}% | font=Menlo size=11"
+fi
 echo "Signal:      ${RSSI} dBm | font=Menlo size=11"
 echo "Noise:       ${NOISE} dBm | font=Menlo size=11"
 echo "SNR:         ${SNR} dB | font=Menlo size=11"

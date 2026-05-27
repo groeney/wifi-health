@@ -46,15 +46,22 @@ The plugin runs every 5 minutes and evaluates your connection against a set of c
 
 | Check | What it looks at |
 |-------|-----------------|
+| `check_hotspot` | Are you on a personal hotspot? (changes how other checks interpret things) |
+| `check_internet_and_latency` | Can you actually reach the internet? What's the latency, jitter, and packet loss? |
+| `check_captive_portal` | Are you stuck behind a login wall? |
 | `check_band` | Are you on 2.4GHz when 5GHz would be better? |
 | `check_signal` | Is RSSI too weak? |
 | `check_noise` | Is signal-to-noise ratio poor? |
 | `check_link_speed` | Is the link rate unusually low? |
-| `check_captive_portal` | Are you stuck behind a login wall? |
+| `check_hotspot_advice` | On a hotspot — is performance bad? Is a known wifi network nearby? |
+
+The most important signal is **end-to-end performance** (latency, jitter, packet loss),
+not the wifi link metrics. A great wifi link to a bad upstream — like a hotspot with
+weak LTE, or a Caltrain network that doesn't route — looks perfect on link metrics alone.
 
 Each check can flag a **high** or **medium** priority recommendation.
-The dot color is determined by combining signal quality with how many
-high-leverage fixes are available.
+The dot color is determined by combining link quality, end-to-end quality, and
+how many high-leverage fixes are available.
 
 ## Adding checks
 
