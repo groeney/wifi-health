@@ -33,6 +33,12 @@ mkdir -p "$HELPER_DIR"
 swiftc -O -o "$HELPER_DIR/wifi-info" "$SCRIPT_DIR/src/wifi-info.swift"
 info "Binary → $HELPER_DIR/wifi-info"
 
+# ── Install actions helper ──────────────────────────────────────────
+info "Installing wifi-actions helper…"
+cp "$SCRIPT_DIR/src/wifi-actions.sh" "$HELPER_DIR/wifi-actions.sh"
+chmod +x "$HELPER_DIR/wifi-actions.sh"
+info "Actions → $HELPER_DIR/wifi-actions.sh"
+
 # ── Install plugin ──────────────────────────────────────────────────
 info "Installing SwiftBar plugin…"
 mkdir -p "$PLUGIN_DIR"

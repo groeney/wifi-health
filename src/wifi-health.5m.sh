@@ -5,6 +5,7 @@
 
 HELPER_DIR="$HOME/Library/Application Support/SwiftBar"
 HELPER="$HELPER_DIR/wifi-info"
+ACTIONS="$HELPER_DIR/wifi-actions.sh"
 
 if [ ! -x "$HELPER" ]; then
     echo "● | size=14 color=#999999"
@@ -40,6 +41,11 @@ LATENCY_AVG=""
 LATENCY_JITTER=""
 PACKET_LOSS=""
 
+# One-click actions to surface. Set by checks below.
+ACT_PORTAL=0          # show "Open login page"
+ACT_RECONNECT=0       # show "Reconnect wifi"
+ACT_SWITCH=""         # SSID to offer switching to
+
 check_hotspot() {
     # Heuristic SSID match for personal hotspots — names like
     # "James's iPhone", "Pixel 8", "Galaxy S23", "Mike's Hotspot".
@@ -73,6 +79,8 @@ check_internet_and_latency() {
         NO_INTERNET=1
         RECS+=("No internet — try a hotspot, sign in to the network, or find another connection")
         LEVS+=("high")
+        ACT_PORTAL=1
+        ACT_RECONNECT=1
         return
     fi
 
@@ -85,6 +93,8 @@ check_internet_and_latency() {
         NO_INTERNET=1
         RECS+=("No internet — try a hotspot, sign in to the network, or find another connection")
         LEVS+=("high")
+        ACT_PORTAL=1
+        ACT_RECONNECT=1
         return
     fi
 
@@ -103,6 +113,7 @@ check_internet_and_latency() {
     if [ "$loss" -gt 10 ] 2>/dev/null; then
         RECS+=("High packet loss (${loss}%) — connection is unreliable")
         LEVS+=("high")
+        ACT_RECONNECT=1
     elif [ "$loss" -gt 2 ] 2>/dev/null; then
         RECS+=("Some packet loss (${loss}%)")
         LEVS+=("medium")
@@ -140,9 +151,11 @@ check_captive_portal() {
     if [ $rc -ne 0 ]; then
         RECS+=("Network is blocking web traffic — check for a login page")
         LEVS+=("high")
+        ACT_PORTAL=1
     elif ! echo "$resp" | grep -q "<TITLE>Success</TITLE>"; then
         RECS+=("Captive portal detected — open a browser to sign in")
         LEVS+=("high")
+        ACT_PORTAL=1
     fi
 }
 
@@ -216,6 +229,7 @@ check_hotspot_advice() {
             if [ -n "$match" ]; then
                 RECS+=("Known network '$match' is in range — switch for likely better speeds")
                 LEVS+=("high")
+                ACT_SWITCH="$match"
             fi
         fi
     fi
@@ -320,5 +334,27 @@ else
     echo "✓ No improvements needed | color=#4CAF50 size=12"
 fi
 
+# ── Quick fixes ─────────────────────────────────────────────────────
+# Show clickable remediations when the situation calls for it.
+# SwiftBar params: shell=<cmd> param1=<arg1> param2=<arg2> ...
+if [ "$ACT_PORTAL" -eq 1 ] || [ "$ACT_RECONNECT" -eq 1 ] || [ -n "$ACT_SWITCH" ]; then
+    echo "---"
+    echo "Quick fixes | size=11 color=#888888"
+
+    if [ "$ACT_PORTAL" -eq 1 ]; then
+        echo "🔓 Open login page | shell=\"$ACTIONS\" param1=portal terminal=false size=12"
+    fi
+
+    if [ -n "$ACT_SWITCH" ]; then
+        echo "📶 Switch to $ACT_SWITCH | shell=\"$ACTIONS\" param1=switch param2=\"$ACT_SWITCH\" terminal=false refresh=true size=12"
+    fi
+
+    if [ "$ACT_RECONNECT" -eq 1 ]; then
+        echo "🔄 Reconnect wifi | shell=\"$ACTIONS\" param1=reconnect terminal=false refresh=true size=12"
+    fi
+fi
+
 echo "---"
-echo "Refresh | refresh=true size=12"
+echo "Run speed test… | shell=\"$ACTIONS\" param1=speed-test terminal=false size=11 color=#888888"
+echo "Wi-Fi settings… | shell=\"$ACTIONS\" param1=settings terminal=false size=11 color=#888888"
+echo "Refresh | refresh=true size=11 color=#888888"

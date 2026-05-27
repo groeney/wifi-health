@@ -63,6 +63,21 @@ Each check can flag a **high** or **medium** priority recommendation.
 The dot color is determined by combining link quality, end-to-end quality, and
 how many high-leverage fixes are available.
 
+## One-click fixes
+
+The dropdown shows clickable remediations when they're relevant:
+
+| Action | When it shows | What it does |
+|--------|--------------|--------------|
+| 🔓 **Open login page** | Captive portal detected, or no internet | Opens `neverssl.com` — a plain-HTTP URL that forces captive portals to show their login screen |
+| 📶 **Switch to [network]** | On a hotspot with a known wifi network in range | Joins the known network (password comes from keychain) |
+| 🔄 **Reconnect wifi** | No internet, or high packet loss | Toggles wifi off/on — fixes stuck DHCP leases and stale routes |
+| **Run speed test…** | Always available | Runs Apple's `networkQuality` test in Terminal (10-20s) |
+| **Wi-Fi settings…** | Always available | Opens the Wi-Fi pane in System Settings |
+
+All actions are non-destructive and don't require `sudo`. Implementations
+live in `src/wifi-actions.sh` — easy to extend with new remediations.
+
 ## Adding checks
 
 Open `src/wifi-health.5m.sh`. Each check is a bash function that appends
