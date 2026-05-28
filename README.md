@@ -113,3 +113,18 @@ check_your_new_thing() {
 
 Then add `check_your_new_thing` to the "Run all checks" section.
 Run `bash install.sh` to deploy your changes.
+
+## Development
+
+Two helper scripts for working on the menu bar icon:
+
+- `bash simulate.sh` — renders the icon across many synthetic (down, up)
+  rate combinations into an HTML table (green/yellow/red + dark mode).
+  Fast, no real traffic — good for eyeballing the size/weight gradient.
+- `bash traffic-sim.sh` — generates **real** network traffic at stepped
+  rates via Cloudflare's speed endpoints (all data discarded), so you can
+  watch the live arrows respond. Takes `down` / `up` / `both` / `all`.
+
+The icon's level→(size, weight) mapping lives in `src/gen-icon.swift`
+(`levelSpecs`); the rate→level thresholds live in `rate_to_level` in both
+`src/wifi-health.10s.sh` and the two sim scripts — keep them in sync.
