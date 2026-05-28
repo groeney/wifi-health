@@ -9,14 +9,16 @@ shift
 
 case "$ACTION" in
     diagnose)
-        # Open a Terminal and run the call-quality decomposition. Runs
-        # interactively so the user can read the verdict; pauses at the
-        # end until a key is pressed.
+        # Open a Terminal and run the call-quality decomposition. No
+        # trailing `read`/`exit` — that pause hung when the prompt didn't
+        # render. The script just runs and returns to the shell prompt;
+        # the window stays open so the verdict stays readable, and the
+        # user closes it (Cmd-W) when done.
         DIAG="$HELPER_DIR/diagnose-call.sh"
         osascript <<APPLESCRIPT
 tell application "Terminal"
     activate
-    do script "bash '$DIAG'; echo; read -n 1 -s -r -p 'Press any key to close…'; exit"
+    do script "bash '$DIAG'"
 end tell
 APPLESCRIPT
         ;;

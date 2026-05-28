@@ -116,3 +116,4 @@ else
     echo "    or the call server — not something you can fix on your end."
 fi
 echo
+echo "${dim}Done — close this window when you're finished (Cmd-W).${rst}"
