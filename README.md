@@ -52,12 +52,13 @@ bash uninstall.sh
 
 ## How it works
 
-The plugin refreshes every 10 seconds, but does the expensive checks
-(ping, captive portal detection, scanning for known networks) at most
-once every 5 minutes. Their results are cached in a small state file
-at `~/Library/Application Support/SwiftBar/wifi-health.state`. Cheap
-work — pulling wifi metrics from CoreWLAN, sampling byte counters for
-the activity meter — runs every cycle.
+The plugin refreshes every 10 seconds. **Connection quality**
+(reachability, latency, jitter, packet loss) and the activity meter are
+measured **every cycle** so the dot reacts in real time — e.g. it turns
+yellow/red within ~10s if your path goes choppy mid-call. The slower,
+rarely-changing checks (captive portal, DNS/HTTPS reachability, scanning
+for known networks) run at most once every 5 minutes and are cached in
+`~/Library/Application Support/SwiftBar/wifi-health.state`.
 
 Checks:
 
@@ -91,8 +92,27 @@ The dropdown shows clickable remediations when they're relevant:
 | 🔓 **Open login page** | Captive portal detected, or no internet | Opens `http://<gateway-ip>/` (DNS-free, works even when the portal blocks DNS) plus Apple's captive detection URL as backup |
 | 📶 **Switch to [network]** | On a hotspot with a known wifi network in range | Joins the known network (password comes from keychain) |
 | 🔄 **Reconnect wifi** | No internet, or high packet loss | Toggles wifi off/on — fixes stuck DHCP leases and stale routes |
+| **Diagnose call quality…** | Always available | Decomposes a choppy-call problem: pings your router (local link), Cloudflare and Google (remote path), and checks bufferbloat — then gives an "is it you?" verdict. See below. |
 | **Run speed test…** | Always available | Runs Apple's `networkQuality` test in Terminal (10-20s) |
 | **Wi-Fi settings…** | Always available | Opens the Wi-Fi pane in System Settings |
+
+### "Is it me?" — diagnosing a bad video call
+
+A choppy call can be your wifi, your ISP, a saturated link, or the far
+end (the other person / the call server). We can't see their connection,
+but **Diagnose call quality…** measures and decomposes *your* path to
+localize the fault:
+
+- Loss/jitter on the **router** hop → it's **your wifi/local link** (move
+  closer, switch to 5GHz, reduce interference, reconnect)
+- Router clean but **remote** hops bad → it's your **ISP/upstream**
+- Latency balloons **under load** → **bufferbloat**; something is
+  saturating your link (check the activity arrows)
+- **Everything clean** → it's almost certainly **the other participant or
+  the call server** — not something you can fix
+
+The real-time dot complements this: if the choppiness is on your side,
+the dot should already be yellow/red with the jitter/loss called out.
 
 All actions are non-destructive and don't require `sudo`. Implementations
 live in `src/wifi-actions.sh` — easy to extend with new remediations.

@@ -47,11 +47,12 @@ rm -rf "$ICONS_DIR"
 mkdir -p "$ICONS_DIR"
 info "Cache → $ICONS_DIR"
 
-# ── Install actions helper ──────────────────────────────────────────
-info "Installing wifi-actions helper…"
-cp "$SCRIPT_DIR/src/wifi-actions.sh" "$HELPER_DIR/wifi-actions.sh"
-chmod +x "$HELPER_DIR/wifi-actions.sh"
-info "Actions → $HELPER_DIR/wifi-actions.sh"
+# ── Install helper scripts ──────────────────────────────────────────
+info "Installing helper scripts…"
+cp "$SCRIPT_DIR/src/wifi-actions.sh"  "$HELPER_DIR/wifi-actions.sh"
+cp "$SCRIPT_DIR/src/diagnose-call.sh" "$HELPER_DIR/diagnose-call.sh"
+chmod +x "$HELPER_DIR/wifi-actions.sh" "$HELPER_DIR/diagnose-call.sh"
+info "Helpers → $HELPER_DIR/{wifi-actions,diagnose-call}.sh"
 
 # ── Install plugin ──────────────────────────────────────────────────
 info "Installing SwiftBar plugin…"

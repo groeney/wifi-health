@@ -17,6 +17,7 @@ rm -f "$PLUGIN_DIR/wifi-health.5m.sh"      # older filename
 rm -f "$HELPER_DIR/wifi-info"
 rm -f "$HELPER_DIR/gen-icon"
 rm -f "$HELPER_DIR/wifi-actions.sh"
+rm -f "$HELPER_DIR/diagnose-call.sh"
 rm -f "$HELPER_DIR/wifi-health.state"
 rm -rf "$HELPER_DIR/icons"
 

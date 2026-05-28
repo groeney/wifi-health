@@ -2,10 +2,25 @@
 # wifi-actions.sh — one-click remediations invoked by the SwiftBar plugin.
 # Each action is intentionally small and non-destructive.
 
+HELPER_DIR="$HOME/Library/Application Support/SwiftBar"
+
 ACTION="$1"
 shift
 
 case "$ACTION" in
+    diagnose)
+        # Open a Terminal and run the call-quality decomposition. Runs
+        # interactively so the user can read the verdict; pauses at the
+        # end until a key is pressed.
+        DIAG="$HELPER_DIR/diagnose-call.sh"
+        osascript <<APPLESCRIPT
+tell application "Terminal"
+    activate
+    do script "bash '$DIAG'; echo; read -n 1 -s -r -p 'Press any key to close…'; exit"
+end tell
+APPLESCRIPT
+        ;;
+
     portal)
         # Force a captive portal to show its login screen.
         #

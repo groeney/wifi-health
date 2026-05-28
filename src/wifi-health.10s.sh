@@ -79,14 +79,12 @@ sample_throughput() {
 }
 
 save_state() {
-    # Persist the heavy-check results so the next refresh can use them.
+    # Persist only the slow-changing heavy-check results. Quality
+    # metrics (NO_INTERNET, latency, loss, jitter) are NOT cached —
+    # they're re-measured every cycle for real-time accuracy.
     # printf %q on KNOWN_NEARBY handles spaces and apostrophes safely.
     {
         printf 'LAST_HEAVY=%s\n'        "$NOW"
-        printf 'NO_INTERNET=%s\n'       "$NO_INTERNET"
-        printf 'LATENCY_AVG=%s\n'       "$LATENCY_AVG"
-        printf 'LATENCY_JITTER=%s\n'    "$LATENCY_JITTER"
-        printf 'PACKET_LOSS=%s\n'       "$PACKET_LOSS"
         printf 'CAPTIVE_DETECTED=%s\n'  "$CAPTIVE_DETECTED"
         printf 'PORTAL_BLOCKED=%s\n'    "$PORTAL_BLOCKED"
         printf 'KNOWN_NEARBY=%q\n'      "$KNOWN_NEARBY"
@@ -314,24 +312,28 @@ check_link_speed() {
 check_hotspot
 sample_throughput
 
+# Connection QUALITY (reachability, loss, jitter, latency) is probed
+# EVERY cycle — never cached — so the dot reacts within ~10s when a
+# path goes choppy mid-call. These outputs are reset then re-measured.
+NO_INTERNET=0
+LATENCY_AVG=""; LATENCY_JITTER=""; PACKET_LOSS=""
+measure_internet_and_latency
+
+# Heavier, slow-changing checks (captive portal, DNS/HTTPS reachability,
+# scanning for known networks) stay cached for $HEAVY_INTERVAL.
 NOW=$(date +%s)
 if (( NOW - LAST_HEAVY > HEAVY_INTERVAL )); then
-    # Reset cached values before remeasuring so partial failures don't
-    # carry forward stale data.
-    NO_INTERNET=0
-    LATENCY_AVG=""; LATENCY_JITTER=""; PACKET_LOSS=""
     CAPTIVE_DETECTED=0; PORTAL_BLOCKED=0
-    KNOWN_NEARBY=""
     DNS_BROKEN=0; HTTPS_BROKEN=0
+    KNOWN_NEARBY=""
 
-    measure_internet_and_latency
     measure_captive_portal
     measure_dns_and_https
     measure_known_nearby
     save_state
 fi
 
-# Interpretations always run, using fresh or cached measurements.
+# Interpretations always run, using fresh (quality) or cached (rest) data.
 interpret_internet_and_latency
 interpret_captive_portal
 interpret_dns_and_https
@@ -487,6 +489,7 @@ if [ "$ACT_PORTAL" -eq 1 ] || [ "$ACT_RECONNECT" -eq 1 ] || [ -n "$ACT_SWITCH" ]
 fi
 
 echo "---"
+echo "Diagnose call quality… | shell=\"$ACTIONS\" param1=diagnose terminal=false size=11 color=#888888"
 echo "Run speed test… | shell=\"$ACTIONS\" param1=speed-test terminal=false size=11 color=#888888"
 echo "Wi-Fi settings… | shell=\"$ACTIONS\" param1=settings terminal=false size=11 color=#888888"
 echo "Re-check connectivity now | shell=\"$ACTIONS\" param1=recheck terminal=false refresh=true size=11 color=#888888"
