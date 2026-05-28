@@ -32,7 +32,7 @@ probe() {
     [ -z "$target" ] && { printf "  %-26s %s\n" "$label" "${dim}(unavailable)${rst}"; return; }
     out=$(ping -c 25 -i 0.2 -W 1 "$target" 2>/dev/null)
     if ! echo "$out" | grep -q "packets transmitted"; then
-        printf "  %-26s %s\n" "$label" "${red}no response${rst}"
+        printf "  %s%-5s%s%-22s %sno response%s\n" "$red" "BAD" "$rst" "$label" "$red" "$rst"
         return
     fi
     LOSS=$(echo "$out" | awk -F'[%]' '/packet loss/{print $1}' | awk '{print $NF}'); LOSS=${LOSS%.*}
@@ -41,15 +41,21 @@ probe() {
     JITTER=$(echo "$stats" | awk -F'=' '{print $2}' | awk -F'/' '{print $4}' | cut -d. -f1)
     AVG=${AVG:-0}; JITTER=${JITTER:-0}
 
-    # Color the line by real-time-media suitability.
-    local mark="$grn●$rst"
-    if [ "$LOSS" -gt 2 ] 2>/dev/null || [ "$JITTER" -gt 30 ] 2>/dev/null; then mark="$red●$rst"
-    elif [ "$LOSS" -gt 0 ] 2>/dev/null || [ "$JITTER" -gt 15 ] 2>/dev/null; then mark="$ylw●$rst"; fi
-    printf "  %s %-24s loss %3s%%   avg %4sms   jitter ±%sms\n" \
-        "$mark" "$label" "$LOSS" "$AVG" "$JITTER"
+    # Tag the line by real-time-media suitability. ASCII tags render in
+    # any terminal/font (the ● glyph showed as ?? in some fonts).
+    local tag col
+    if [ "$LOSS" -gt 2 ] 2>/dev/null || [ "$JITTER" -gt 30 ] 2>/dev/null; then
+        tag="BAD";  col="$red"
+    elif [ "$LOSS" -gt 0 ] 2>/dev/null || [ "$JITTER" -gt 15 ] 2>/dev/null; then
+        tag="WARN"; col="$ylw"
+    else
+        tag="OK";   col="$grn"
+    fi
+    printf "  %s%-5s%s%-22s loss %3s%%   avg %4sms   jitter ±%sms\n" \
+        "$col" "$tag" "$rst" "$label" "$LOSS" "$AVG" "$JITTER"
 }
 
-echo "${bold}Path quality${rst}  ${dim}(green ok · yellow marginal · red bad for calls)${rst}"
+echo "${bold}Path quality${rst}  ${dim}(OK · WARN · BAD for real-time calls)${rst}"
 probe "Your router (local)" "$GW";   GW_LOSS=$LOSS;  GW_JIT=$JITTER
 probe "Internet (Cloudflare)" "1.1.1.1"; CF_LOSS=$LOSS; CF_JIT=$JITTER
 probe "Google (Meet path)" "8.8.8.8";    GG_LOSS=$LOSS; GG_JIT=$JITTER
@@ -68,10 +74,11 @@ loaded=${loaded:-0}
 wait "$LOADPID" 2>/dev/null
 BLOAT=$(( loaded - base ))
 [ "$BLOAT" -lt 0 ] && BLOAT=0
-bmark="$grn●$rst"
-if   [ "$BLOAT" -gt 100 ] 2>/dev/null; then bmark="$red●$rst"
-elif [ "$BLOAT" -gt 40  ] 2>/dev/null; then bmark="$ylw●$rst"; fi
-printf "  %s idle %sms → loaded %sms   (+%sms under load)\n" "$bmark" "$base" "$loaded" "$BLOAT"
+btag="OK";  bcol="$grn"
+if   [ "$BLOAT" -gt 100 ] 2>/dev/null; then btag="BAD";  bcol="$red"
+elif [ "$BLOAT" -gt 40  ] 2>/dev/null; then btag="WARN"; bcol="$ylw"; fi
+printf "  %s%-5s%sidle %sms -> loaded %sms   (+%sms under load)\n" \
+    "$bcol" "$btag" "$rst" "$base" "$loaded" "$BLOAT"
 
 # ── Verdict ─────────────────────────────────────────────────────────
 echo
@@ -87,23 +94,23 @@ remote_bad=0
 bloat_bad=0;  [ "$BLOAT" -gt 100 ] 2>/dev/null && bloat_bad=1
 
 if [ "$local_bad" -eq 1 ]; then
-    echo "  ${red}▸ It's YOUR local link (wifi / router).${rst}"
+    echo "  ${red}> It's YOUR local link (wifi / router).${rst}"
     echo "    Loss or jitter is appearing on the very first hop, so the"
     echo "    problem is between your Mac and your router."
     echo "    Try: move closer to the router · switch to 5GHz · reduce"
     echo "    interference (microwaves, neighbors) · reconnect wifi."
 elif [ "$bloat_bad" -eq 1 ]; then
-    echo "  ${red}▸ Bufferbloat — your link is being saturated.${rst}"
+    echo "  ${red}> Bufferbloat — your link is being saturated.${rst}"
     echo "    Latency jumps +${BLOAT}ms when busy, which makes calls stutter."
     echo "    Something is using your bandwidth (check the menu bar arrows)."
     echo "    Try: pause big downloads/uploads, cloud sync, or backups."
 elif [ "$remote_bad" -eq 1 ]; then
-    echo "  ${ylw}▸ Your ISP / upstream path is degraded.${rst}"
+    echo "  ${ylw}> Your ISP / upstream path is degraded.${rst}"
     echo "    Your local link is clean but loss/jitter appears further out."
     echo "    Less in your control. Try: reconnect wifi; if it persists"
     echo "    across calls, it may be worth contacting your ISP."
 else
-    echo "  ${grn}▸ Your side looks clean.${rst}"
+    echo "  ${grn}> Your side looks clean.${rst}"
     echo "    Low loss, low jitter, no bufferbloat all the way out. The"
     echo "    choppiness was most likely the OTHER participant's connection"
     echo "    or the call server — not something you can fix on your end."
