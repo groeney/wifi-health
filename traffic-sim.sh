@@ -22,7 +22,10 @@
 
 set -u
 
-DOWN_URL="https://speed.cloudflare.com/__down?bytes=50000000000"
+# Cloudflare caps __down at ~50 MB per request, so we request 50 MB
+# chunks and loop them to fill the hold window (a chunk drains in a
+# second or two at high rates).
+DOWN_URL="https://speed.cloudflare.com/__down?bytes=50000000"
 UP_URL="https://speed.cloudflare.com/__up"
 HOLD="${HOLD:-20}"
 SCRATCH="$(mktemp -t wifihealthsim.XXXXXX)"
@@ -45,22 +48,36 @@ trap cleanup INT TERM
 echo "Building 64 MB upload buffer…"
 dd if=/dev/zero of="$SCRATCH" bs=1048576 count=64 2>/dev/null
 
-# run_down <rate|max> — one capped GET that fills the hold window.
+# run_down <rate|max> — GET 50 MB chunks to /dev/null, looping until
+# the hold window ends. Separate branches for max vs throttled so we
+# never expand an empty array (macOS bash 3.2 + set -u chokes on that).
 run_down() {
-    local lim=()
-    [ "$1" != "max" ] && lim=(--limit-rate "$1")
-    curl -s --max-time "$HOLD" "${lim[@]}" "$DOWN_URL" -o /dev/null 2>/dev/null || true
-}
-
-# run_up <rate|max> — POST the buffer, looping until the hold window ends
-# (a single buffer can drain before HOLD at higher rates).
-run_up() {
-    local lim=() end remaining
-    [ "$1" != "max" ] && lim=(--limit-rate "$1")
+    local end remaining
     end=$(( $(date +%s) + HOLD ))
     while remaining=$(( end - $(date +%s) )); [ "$remaining" -gt 0 ]; do
-        curl -s --max-time "$remaining" "${lim[@]}" \
-            -X POST --data-binary @"$SCRATCH" "$UP_URL" -o /dev/null 2>/dev/null || true
+        if [ "$1" = "max" ]; then
+            curl -s --max-time "$remaining" \
+                "$DOWN_URL" -o /dev/null 2>/dev/null || true
+        else
+            curl -s --max-time "$remaining" --limit-rate "$1" \
+                "$DOWN_URL" -o /dev/null 2>/dev/null || true
+        fi
+    done
+}
+
+# run_up <rate|max> — POST the buffer, looping until the hold window
+# ends (a single buffer drains before HOLD at higher rates).
+run_up() {
+    local end remaining
+    end=$(( $(date +%s) + HOLD ))
+    while remaining=$(( end - $(date +%s) )); [ "$remaining" -gt 0 ]; do
+        if [ "$1" = "max" ]; then
+            curl -s --max-time "$remaining" \
+                -X POST --data-binary @"$SCRATCH" "$UP_URL" -o /dev/null 2>/dev/null || true
+        else
+            curl -s --max-time "$remaining" --limit-rate "$1" \
+                -X POST --data-binary @"$SCRATCH" "$UP_URL" -o /dev/null 2>/dev/null || true
+        fi
     done
 }
 
