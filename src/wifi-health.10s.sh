@@ -480,47 +480,50 @@ echo "-- SNR:         ${SNR} dB | font=Menlo size=12"
 echo "-- Channel:     ${CHANNEL} ($BAND) | font=Menlo size=12"
 echo "-- Link Speed:  ${TX_RATE} Mbps | font=Menlo size=12"
 
-# ── Call quality — submenu, results only show after you run it ──────
+# ── Call quality — read-only detail in a submenu; the trigger stays
+#    TOP-LEVEL because SwiftBar submenu shell actions don't fire. ─────
 DIAG_STATUS=""; DIAG_START=0; DIAG_END=0; DIAG_VERDICT=""
 DIAG_RTR=""; DIAG_CF=""; DIAG_GG=""; DIAG_BLOAT=""
 [ -f "$HELPER_DIR/diagnose.result" ] && . "$HELPER_DIR/diagnose.result"
 diag_now=$(date +%s)
-diag_color() { case "$1" in WARN) echo "#FF9800";; BAD) echo "#F44336";; NA) echo "#888888";; *) echo "#4CAF50";; esac; }
+# Color only flags problems; OK lines keep the default text color so a
+# clean result isn't a wall of green.
+diag_cparam() { case "$1" in WARN) printf ' color=#FF9800';; BAD) printf ' color=#F44336';; NA) printf ' color=#888888';; esac; }
 
 if [ "$DIAG_STATUS" = "running" ] && [ $(( diag_now - DIAG_START )) -lt 90 ]; then
     echo "Call quality — diagnosing… $(( diag_now - DIAG_START ))s | size=12 color=#888888"
-    echo "-- Reopen this menu in a few seconds for the result | size=11 color=#888888"
 elif [ "$DIAG_STATUS" = "done" ] && [ $(( diag_now - DIAG_END )) -lt 900 ]; then
     age=$(( diag_now - DIAG_END ))
     if   [ "$age" -lt 60 ];   then agestr="just now"
     elif [ "$age" -lt 3600 ]; then agestr="$(( age / 60 ))m ago"
     else                           agestr="$(( age / 3600 ))h ago"; fi
+    # Verdict line = submenu parent. Color only when it's a problem.
     case "$DIAG_VERDICT" in
         local)  echo "Call quality: likely your wifi | size=12 color=#F44336" ;;
         bloat)  echo "Call quality: bufferbloat | size=12 color=#F44336" ;;
         remote) echo "Call quality: ISP path | size=12 color=#FF9800" ;;
-        *)      echo "Call quality: your side is clean | size=12 color=#4CAF50" ;;
+        *)      echo "Call quality: your side is clean | size=12" ;;
     esac
     echo "-- checked $agestr | size=11 color=#888888"
     for entry in "Router (local)|$DIAG_RTR" "Internet|$DIAG_CF" "Google/Meet|$DIAG_GG"; do
         lbl="${entry%%|*}"; read -r t l a j <<< "${entry#*|}"
         [ "$t" = "NA" ] && t="--"
         body=$(printf '%-4s %-13s %s%% loss · %sms · ±%sms' "$t" "$lbl" "$l" "$a" "$j")
-        echo "-- $body | font=Menlo size=12 color=$(diag_color "$t")"
+        echo "-- $body | font=Menlo size=12$(diag_cparam "$t")"
     done
     read -r bt bi bl bd <<< "$DIAG_BLOAT"
     bbody=$(printf '%-4s %-13s +%sms under load' "$bt" "Bufferbloat" "$bd")
-    echo "-- $bbody | font=Menlo size=12 color=$(diag_color "$bt")"
+    echo "-- $bbody | font=Menlo size=12$(diag_cparam "$bt")"
     case "$DIAG_VERDICT" in
-        local)  echo "-- Likely YOU — move closer, try 5GHz, reconnect | color=#F44336 size=11" ;;
+        local)  echo "-- Move closer, try 5GHz, or reconnect | color=#F44336 size=11" ;;
         bloat)  echo "-- Something's saturating your link (check the arrows) | color=#F44336 size=11" ;;
-        remote) echo "-- Local link clean; degraded further out (ISP) | color=#FF9800 size=11" ;;
-        *)      echo "-- Likely the other end or the call server, not you | color=#4CAF50 size=11" ;;
+        remote) echo "-- Local link clean; degraded upstream (ISP) | color=#FF9800 size=11" ;;
+        *)      echo "-- Likely the other end or call server, not you | color=#888888 size=11" ;;
     esac
-    echo "-- Run again | shell=\"$ACTIONS\" param1=diagnose terminal=false refresh=true size=11 color=#888888"
+    # Trigger at TOP LEVEL so the action actually fires.
+    echo "Re-run call quality | shell=\"$ACTIONS\" param1=diagnose terminal=false refresh=true size=11 color=#888888"
 else
-    echo "Call quality | size=12"
-    echo "-- Diagnose now — is choppiness me or them? (~15s) | shell=\"$ACTIONS\" param1=diagnose terminal=false refresh=true size=12"
+    echo "Diagnose call quality | shell=\"$ACTIONS\" param1=diagnose terminal=false refresh=true size=12"
 fi
 
 # ── More — tools, collapsed into a submenu ──────────────────────────
