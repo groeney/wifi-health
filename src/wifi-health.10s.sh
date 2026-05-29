@@ -443,23 +443,11 @@ else
     echo "● | size=14 color=$COLOR"
 fi
 echo "---"
-echo "$SSID_DISPLAY — $LABEL | size=13"
+echo "$SSID_DISPLAY — $LABEL | size=14"
 echo "$MSG | size=11 color=#888888"
-echo "---"
-RATE_IN=$(format_rate "$BYTES_IN_RATE")
-RATE_OUT=$(format_rate "$BYTES_OUT_RATE")
-echo "↓ Down:      ${RATE_IN}/s | font=Menlo size=11"
-echo "↑ Up:        ${RATE_OUT}/s | font=Menlo size=11"
-if [ -n "$LATENCY_AVG" ]; then
-    echo "Latency:     ${LATENCY_AVG} ms (±${LATENCY_JITTER}) | font=Menlo size=11"
-    echo "Loss:        ${PACKET_LOSS}% | font=Menlo size=11"
-fi
-echo "Signal:      ${RSSI} dBm | font=Menlo size=11"
-echo "Noise:       ${NOISE} dBm | font=Menlo size=11"
-echo "SNR:         ${SNR} dB | font=Menlo size=11"
-echo "Channel:     ${CHANNEL} ($BAND) | font=Menlo size=11"
-echo "Link Speed:  ${TX_RATE} Mbps | font=Menlo size=11"
 
+# Actionable recommendations + one-click fixes stay at the top level —
+# they only appear when there's actually something to act on.
 if [ ${#RECS[@]} -gt 0 ]; then
     echo "---"
     for i in "${!RECS[@]}"; do
@@ -469,66 +457,75 @@ if [ ${#RECS[@]} -gt 0 ]; then
             echo "→ ${RECS[$i]} | color=#FF9800 size=12"
         fi
     done
-else
-    echo "---"
-    echo "✓ No improvements needed | color=#4CAF50 size=12"
+    [ "$ACT_PORTAL" -eq 1 ] && echo "🔓 Open login page | shell=\"$ACTIONS\" param1=portal terminal=false size=12"
+    [ -n "$ACT_SWITCH" ] && echo "📶 Switch to $ACT_SWITCH | shell=\"$ACTIONS\" param1=switch param2=\"$ACT_SWITCH\" terminal=false refresh=true size=12"
+    [ "$ACT_RECONNECT" -eq 1 ] && echo "🔄 Reconnect wifi | shell=\"$ACTIONS\" param1=reconnect terminal=false refresh=true size=12"
 fi
 
-if [ "$ACT_PORTAL" -eq 1 ] || [ "$ACT_RECONNECT" -eq 1 ] || [ -n "$ACT_SWITCH" ]; then
-    echo "---"
-    echo "Quick fixes | size=11 color=#888888"
-    if [ "$ACT_PORTAL" -eq 1 ]; then
-        echo "🔓 Open login page | shell=\"$ACTIONS\" param1=portal terminal=false size=12"
-    fi
-    if [ -n "$ACT_SWITCH" ]; then
-        echo "📶 Switch to $ACT_SWITCH | shell=\"$ACTIONS\" param1=switch param2=\"$ACT_SWITCH\" terminal=false refresh=true size=12"
-    fi
-    if [ "$ACT_RECONNECT" -eq 1 ]; then
-        echo "🔄 Reconnect wifi | shell=\"$ACTIONS\" param1=reconnect terminal=false refresh=true size=12"
-    fi
-fi
-
-# ── Call-quality diagnosis (on-demand, shown in-dropdown) ───────────
 echo "---"
+
+# ── Details — raw metrics, collapsed into a submenu ─────────────────
+RATE_IN=$(format_rate "$BYTES_IN_RATE")
+RATE_OUT=$(format_rate "$BYTES_OUT_RATE")
+echo "Details | size=12"
+echo "-- ↓ Down:      ${RATE_IN}/s | font=Menlo size=12"
+echo "-- ↑ Up:        ${RATE_OUT}/s | font=Menlo size=12"
+if [ -n "$LATENCY_AVG" ]; then
+    echo "-- Latency:     ${LATENCY_AVG} ms (±${LATENCY_JITTER}) | font=Menlo size=12"
+    echo "-- Loss:        ${PACKET_LOSS}% | font=Menlo size=12"
+fi
+echo "-- Signal:      ${RSSI} dBm | font=Menlo size=12"
+echo "-- Noise:       ${NOISE} dBm | font=Menlo size=12"
+echo "-- SNR:         ${SNR} dB | font=Menlo size=12"
+echo "-- Channel:     ${CHANNEL} ($BAND) | font=Menlo size=12"
+echo "-- Link Speed:  ${TX_RATE} Mbps | font=Menlo size=12"
+
+# ── Call quality — submenu, results only show after you run it ──────
 DIAG_STATUS=""; DIAG_START=0; DIAG_END=0; DIAG_VERDICT=""
 DIAG_RTR=""; DIAG_CF=""; DIAG_GG=""; DIAG_BLOAT=""
 [ -f "$HELPER_DIR/diagnose.result" ] && . "$HELPER_DIR/diagnose.result"
 diag_now=$(date +%s)
-
 diag_color() { case "$1" in WARN) echo "#FF9800";; BAD) echo "#F44336";; NA) echo "#888888";; *) echo "#4CAF50";; esac; }
 
 if [ "$DIAG_STATUS" = "running" ] && [ $(( diag_now - DIAG_START )) -lt 90 ]; then
-    echo "Diagnosing call quality… $(( diag_now - DIAG_START ))s | size=11 color=#888888"
-    echo "↻ Reopen this menu in a few seconds for the result | size=11 color=#888888"
+    echo "Call quality — diagnosing… $(( diag_now - DIAG_START ))s | size=12 color=#888888"
+    echo "-- Reopen this menu in a few seconds for the result | size=11 color=#888888"
 elif [ "$DIAG_STATUS" = "done" ] && [ $(( diag_now - DIAG_END )) -lt 900 ]; then
     age=$(( diag_now - DIAG_END ))
     if   [ "$age" -lt 60 ];   then agestr="just now"
     elif [ "$age" -lt 3600 ]; then agestr="$(( age / 60 ))m ago"
     else                           agestr="$(( age / 3600 ))h ago"; fi
-    echo "Call quality — checked $agestr | size=11 color=#888888"
+    case "$DIAG_VERDICT" in
+        local)  echo "Call quality: likely your wifi | size=12 color=#F44336" ;;
+        bloat)  echo "Call quality: bufferbloat | size=12 color=#F44336" ;;
+        remote) echo "Call quality: ISP path | size=12 color=#FF9800" ;;
+        *)      echo "Call quality: your side is clean | size=12 color=#4CAF50" ;;
+    esac
+    echo "-- checked $agestr | size=11 color=#888888"
     for entry in "Router (local)|$DIAG_RTR" "Internet|$DIAG_CF" "Google/Meet|$DIAG_GG"; do
         lbl="${entry%%|*}"; read -r t l a j <<< "${entry#*|}"
         [ "$t" = "NA" ] && t="--"
-        printf '%-4s %-13s %s%% loss · %sms · ±%sms | font=Menlo size=12 color=%s\n' \
-            "$t" "$lbl" "$l" "$a" "$j" "$(diag_color "$t")"
+        body=$(printf '%-4s %-13s %s%% loss · %sms · ±%sms' "$t" "$lbl" "$l" "$a" "$j")
+        echo "-- $body | font=Menlo size=12 color=$(diag_color "$t")"
     done
     read -r bt bi bl bd <<< "$DIAG_BLOAT"
-    printf '%-4s %-13s +%sms under load | font=Menlo size=12 color=%s\n' \
-        "$bt" "Bufferbloat" "$bd" "$(diag_color "$bt")"
+    bbody=$(printf '%-4s %-13s +%sms under load' "$bt" "Bufferbloat" "$bd")
+    echo "-- $bbody | font=Menlo size=12 color=$(diag_color "$bt")"
     case "$DIAG_VERDICT" in
-        local)  echo "⚡ Likely YOU — your wifi/local link. Move closer, try 5GHz, reconnect | color=#F44336 size=12" ;;
-        bloat)  echo "⚡ Bufferbloat — something's saturating your link (check the arrows) | color=#F44336 size=12" ;;
-        remote) echo "→ Your ISP / upstream path is degraded | color=#FF9800 size=12" ;;
-        *)      echo "✓ Your side is clean — likely the other end or the call server | color=#4CAF50 size=12" ;;
+        local)  echo "-- Likely YOU — move closer, try 5GHz, reconnect | color=#F44336 size=11" ;;
+        bloat)  echo "-- Something's saturating your link (check the arrows) | color=#F44336 size=11" ;;
+        remote) echo "-- Local link clean; degraded further out (ISP) | color=#FF9800 size=11" ;;
+        *)      echo "-- Likely the other end or the call server, not you | color=#4CAF50 size=11" ;;
     esac
-    echo "↻ Run call-quality test again | shell=\"$ACTIONS\" param1=diagnose terminal=false refresh=true size=11 color=#888888"
+    echo "-- Run again | shell=\"$ACTIONS\" param1=diagnose terminal=false refresh=true size=11 color=#888888"
 else
-    echo "Diagnose call quality | shell=\"$ACTIONS\" param1=diagnose terminal=false refresh=true size=12"
-    echo "↳ Choppy call — is it me or them? (~15s check) | size=11 color=#888888"
+    echo "Call quality | size=12"
+    echo "-- Diagnose now — is choppiness me or them? (~15s) | shell=\"$ACTIONS\" param1=diagnose terminal=false refresh=true size=12"
 fi
 
-echo "---"
-echo "Run speed test… | shell=\"$ACTIONS\" param1=speed-test terminal=false size=11 color=#888888"
-echo "Wi-Fi settings… | shell=\"$ACTIONS\" param1=settings terminal=false size=11 color=#888888"
-echo "Re-check connectivity now | shell=\"$ACTIONS\" param1=recheck terminal=false refresh=true size=11 color=#888888"
-echo "Refresh | refresh=true size=11 color=#888888"
+# ── More — tools, collapsed into a submenu ──────────────────────────
+echo "More | size=12"
+echo "-- Run speed test… | shell=\"$ACTIONS\" param1=speed-test terminal=false size=12"
+echo "-- Wi-Fi settings… | shell=\"$ACTIONS\" param1=settings terminal=false size=12"
+echo "-- Re-check connectivity now | shell=\"$ACTIONS\" param1=recheck terminal=false refresh=true size=12"
+echo "-- Refresh | refresh=true size=12"

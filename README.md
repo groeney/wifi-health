@@ -17,8 +17,10 @@ variants total) so the colored dot and gray arrow share one menu bar
 slot and stay flush together regardless of SwiftBar's inter-item
 spacing.
 
-Click the icon for signal metrics, current down/up rates, latency,
-noise levels, and specific recommendations.
+Click the icon for a compact menu: the headline status plus any
+actionable recommendations up top, with raw metrics (**Details**), the
+call-quality diagnosis (**Call quality**), and tools (**More**) tucked
+into submenus you open only when you want them.
 
 ## Install
 
