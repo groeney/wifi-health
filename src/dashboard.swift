@@ -1,12 +1,12 @@
 // dashboard.swift — the "Dashboard" pop-out window for wifi-health.
 //
-// A small native AppKit + SwiftUI app: live connection metrics plus the
-// interactive tests (call quality, speed test) that need real progress
-// feedback — things a menu can't do. Buttons work because the app owns
-// its own subprocesses (unlike a SwiftBar menu action).
+// Native AppKit + SwiftUI. Live connection metrics plus the interactive
+// tests (call quality, speed test) that need real progress feedback —
+// things a menu can't do. Buttons work because the app owns its own
+// subprocesses. Also self-checks for updates and can apply them.
 //
-// Launched via `open WifiHealth.app` from the pared-down SwiftBar menu.
-// Compiled locally by install.sh — no notarization needed.
+// Launched via `open WifiHealth.app` from the SwiftBar menu. Compiled
+// locally by install.sh — no notarization needed.
 
 import AppKit
 import SwiftUI
@@ -44,9 +44,10 @@ extension Color {
     }
 }
 
-let GREEN = Color(hex: "4CAF50")
-let AMBER = Color(hex: "FF9800")
-let RED   = Color(hex: "F44336")
+let GREEN  = Color(hex: "30D158")
+let AMBER  = Color(hex: "FF9F0A")
+let RED    = Color(hex: "FF453A")
+let ACCENT = Color(hex: "0A84FF")
 
 func tagColor(_ tag: String) -> Color {
     switch tag { case "WARN": return AMBER; case "BAD": return RED; case "NA": return .secondary; default: return GREEN }
@@ -89,6 +90,9 @@ final class WifiModel: ObservableObject {
     @Published var speedResp: String? = nil
     @Published var speedCheckedAt: Date? = nil
 
+    @Published var updateState = ""        // available / current / unknown
+    @Published var updateApplying = false
+
     private let iface = CWWiFiClient.shared().interface()
     private var lastIn = 0, lastOut = 0
     private var lastSample = Date()
@@ -96,10 +100,12 @@ final class WifiModel: ObservableObject {
     private let helperDir = NSString(string: "~/Library/Application Support/SwiftBar").expandingTildeInPath
     private var diagScript: String { helperDir + "/diagnose-call.sh" }
     private var resultFile: String { helperDir + "/diagnose.result" }
+    private var updateScript: String { helperDir + "/wifi-update.sh" }
 
     func start() {
         tick()
         timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in self?.tick() }
+        checkUpdate()
     }
 
     func tick() {
@@ -154,11 +160,11 @@ final class WifiModel: ObservableObject {
     }
 
     var status: (Color, String, String) {
-        if !online { return (RED, "No internet", "Connected to wifi but can't reach the web") }
+        if !online { return (RED, "No internet", "connected to wifi but can't reach the web") }
         let l = loss ?? 0, lt = latency ?? 0, jt = jitter ?? 0
-        if l > 10 || lt > 200 { return (RED, "Poor", "High loss or latency — calls and pages will struggle") }
-        if l > 2 || lt > 80 || jt > 30 || rssi < -72 { return (AMBER, "OK", "Usable, but room to improve") }
-        return (GREEN, "Good", "You're good")
+        if l > 10 || lt > 200 { return (RED, "Poor", "high loss or latency — calls will struggle") }
+        if l > 2 || lt > 80 || jt > 30 || rssi < -72 { return (AMBER, "OK", "usable, but room to improve") }
+        return (GREEN, "Good", "everything looks healthy")
     }
 
     // ── Call quality ────────────────────────────────────────────────
@@ -187,18 +193,18 @@ final class WifiModel: ObservableObject {
             guard let raw = map[key] else { return nil }
             let f = raw.split(separator: " ").map(String.init)
             guard f.count >= 4 else { return nil }
-            if key == "DIAG_BLOAT" { return Hop(name: label, tag: f[0], detail: "+\(f[3])ms under load") }
-            return Hop(name: label, tag: f[0], detail: "\(f[1])% loss · \(f[2])ms · ±\(f[3])ms")
+            if key == "DIAG_BLOAT" { return Hop(name: label, tag: f[0], detail: "+\(f[3]) ms under load") }
+            return Hop(name: label, tag: f[0], detail: "\(f[1])% · \(f[2]) ms · ±\(f[3])")
         }
         var hops: [Hop] = []
-        if let h = hop("DIAG_RTR", "Router (local)") { hops.append(h) }
+        if let h = hop("DIAG_RTR", "Your router") { hops.append(h) }
         if let h = hop("DIAG_CF", "Internet") { hops.append(h) }
         if let h = hop("DIAG_GG", "Google / Meet") { hops.append(h) }
         if let h = hop("DIAG_BLOAT", "Bufferbloat") { hops.append(h) }
         return (hops, map["DIAG_VERDICT"] ?? "")
     }
 
-    // ── Speed test (networkQuality) ─────────────────────────────────
+    // ── Speed test ──────────────────────────────────────────────────
     func runSpeedTest() {
         guard !speedRunning else { return }
         speedRunning = true; speedDown = nil; speedUp = nil; speedResp = nil
@@ -218,6 +224,29 @@ final class WifiModel: ObservableObject {
         }
     }
 
+    // ── Updates ─────────────────────────────────────────────────────
+    func checkUpdate() {
+        DispatchQueue.global().async { [weak self] in
+            guard let self = self else { return }
+            let out = runCmd("/bin/bash", [self.updateScript, "check"]).trimmingCharacters(in: .whitespacesAndNewlines)
+            DispatchQueue.main.async { self.updateState = out }
+        }
+    }
+
+    func applyUpdate() {
+        guard !updateApplying else { return }
+        updateApplying = true
+        DispatchQueue.global().async { [weak self] in
+            guard let self = self else { return }
+            _ = runCmd("/bin/bash", [self.updateScript, "apply"])
+            let appPath = self.helperDir + "/WifiHealth.app"
+            DispatchQueue.main.async {
+                _ = runCmd("/usr/bin/open", ["-n", appPath])   // launch the rebuilt app
+                NSApp.terminate(nil)
+            }
+        }
+    }
+
     func openWifiSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.wifi-settings-extension") {
             NSWorkspace.shared.open(url)
@@ -231,130 +260,195 @@ struct DashboardView: View {
 
     var body: some View {
         let (col, label, msg) = model.status
-        VStack(alignment: .leading, spacing: 0) {
-            // Header
-            HStack(spacing: 10) {
-                Circle().fill(col).frame(width: 14, height: 14)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(model.ssid).font(.system(size: 16, weight: .semibold))
-                    Text("\(label) — \(msg)").font(.system(size: 11)).foregroundColor(.secondary)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    HStack(spacing: 4) {
-                        Circle().fill(GREEN).frame(width: 6, height: 6)
-                        Text("live").font(.system(size: 10)).foregroundColor(.secondary)
-                    }
-                    Text("updated \(relative(model.lastUpdate))").font(.system(size: 9)).foregroundColor(.secondary)
-                }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if model.updateState == "available" { updateBanner }
+                header(col, label, msg)
+                metricsCard
+                callQualityCard
+                speedCard
+                footer
             }
+            .padding(.horizontal, 18)
+            .padding(.top, 34)     // clear the transparent title bar
+            .padding(.bottom, 18)
+        }
+        .frame(width: 430, height: 660)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    // Header --------------------------------------------------------
+    func header(_ col: Color, _ label: String, _ msg: String) -> some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle().fill(col.opacity(0.18)).frame(width: 48, height: 48)
+                Circle().fill(col).frame(width: 16, height: 16)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(model.ssid).font(.system(size: 21, weight: .bold))
+                (Text(label).foregroundColor(col).fontWeight(.semibold)
+                 + Text("  ·  \(msg)").foregroundColor(.secondary))
+                    .font(.system(size: 12))
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 3) {
+                HStack(spacing: 5) {
+                    Circle().fill(GREEN).frame(width: 6, height: 6)
+                    Text("LIVE").font(.system(size: 9, weight: .heavy)).tracking(0.8).foregroundColor(.secondary)
+                }
+                Text(relative(model.lastUpdate)).font(.system(size: 10)).foregroundColor(.secondary)
+            }
+        }
+    }
+
+    // Metrics -------------------------------------------------------
+    var metricsCard: some View {
+        card {
+            LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading),
+                                GridItem(.flexible(), alignment: .leading)], spacing: 16) {
+                stat("DOWNLOAD", humanRate(model.downRate))
+                stat("UPLOAD", humanRate(model.upRate))
+                stat("LATENCY", model.latency.map { "\($0) ms" + (model.jitter.map { " ±\($0)" } ?? "") } ?? "—")
+                stat("LOSS", model.loss.map { "\($0)%" } ?? "—")
+                stat("SIGNAL", "\(model.rssi) dBm")
+                stat("SNR", "\(model.snr) dB")
+                stat("CHANNEL", "\(model.channel) · \(model.band)")
+                stat("LINK RATE", "\(model.txRate) Mbps")
+            }
+        }
+    }
+
+    // Call quality --------------------------------------------------
+    var callQualityCard: some View {
+        card {
+            cardHeader("Call quality", trailing: model.diagCheckedAt.map { relative($0) })
+            if model.diagRunning {
+                busy("Testing your path…  ~15s")
+            } else if !model.diagHops.isEmpty {
+                VStack(spacing: 8) { ForEach(model.diagHops) { hopRow($0) } }
+                verdictBox(model.diagVerdict)
+            } else {
+                Text("Choppy call? Find out if it's you or the other end.")
+                    .font(.system(size: 12)).foregroundColor(.secondary)
+            }
+            primaryButton(model.diagHops.isEmpty ? "Run call-quality check" : "Run again",
+                          running: model.diagRunning) { model.runDiagnosis() }
+        }
+    }
+
+    func hopRow(_ h: WifiModel.Hop) -> some View {
+        HStack(spacing: 10) {
+            Text(h.tag)
+                .font(.system(size: 10, weight: .bold))
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(tagColor(h.tag).opacity(0.18)).foregroundColor(tagColor(h.tag))
+                .clipShape(Capsule())
+                .frame(width: 52, alignment: .leading)
+            Text(h.name).font(.system(size: 13)).frame(width: 110, alignment: .leading)
+            Spacer()
+            Text(h.detail).font(.system(size: 12, design: .rounded)).foregroundColor(.secondary)
+        }
+    }
+
+    // Speed test ----------------------------------------------------
+    var speedCard: some View {
+        card {
+            cardHeader("Speed test", trailing: model.speedCheckedAt.map { relative($0) })
+            if model.speedRunning {
+                busy("Measuring throughput…  ~15s")
+            } else if model.speedDown != nil || model.speedUp != nil {
+                LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading),
+                                    GridItem(.flexible(), alignment: .leading)], spacing: 14) {
+                    stat("DOWNLOAD", model.speedDown ?? "—")
+                    stat("UPLOAD", model.speedUp ?? "—")
+                }
+                if let r = model.speedResp { stat("RESPONSIVENESS", r) }
+            } else {
+                Text("Measure real download / upload throughput.")
+                    .font(.system(size: 12)).foregroundColor(.secondary)
+            }
+            primaryButton(model.speedDown == nil ? "Run speed test" : "Run again",
+                          running: model.speedRunning) { model.runSpeedTest() }
+        }
+    }
+
+    // Footer --------------------------------------------------------
+    var footer: some View {
+        HStack {
+            Button { model.tick() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+            Spacer()
+            Button { model.openWifiSettings() } label: { Label("Wi-Fi settings", systemImage: "gearshape") }
+        }
+        .buttonStyle(.borderless).controlSize(.small).foregroundColor(.secondary)
+        .padding(.top, 2)
+    }
+
+    var updateBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.down.circle.fill").foregroundColor(ACCENT)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Update available").font(.system(size: 12, weight: .semibold))
+                Text("a newer version is on GitHub").font(.system(size: 10)).foregroundColor(.secondary)
+            }
+            Spacer()
+            Button(model.updateApplying ? "Updating…" : "Update now") { model.applyUpdate() }
+                .buttonStyle(.borderedProminent).tint(ACCENT).controlSize(.small)
+                .disabled(model.updateApplying)
+        }
+        .padding(12)
+        .background(ACCENT.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    // Building blocks ----------------------------------------------
+    func card<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 12) { content() }
             .padding(16)
-            Divider()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    // Live metrics
-                    section("LIVE") {
-                        row { metric("↓ Down", humanRate(model.downRate)); metric("↑ Up", humanRate(model.upRate)) }
-                        row { metric("Latency", model.latency.map { "\($0) ms (±\(model.jitter ?? 0))" } ?? "—"); metric("Loss", model.loss.map { "\($0)%" } ?? "—") }
-                        row { metric("Signal", "\(model.rssi) dBm"); metric("SNR", "\(model.snr) dB") }
-                        row { metric("Channel", "\(model.channel) (\(model.band))"); metric("Link", "\(model.txRate) Mbps") }
-                    }
-                    Divider()
-
-                    // Call quality
-                    section("CALL QUALITY", trailing: model.diagCheckedAt.map { relative($0) }) {
-                        if model.diagRunning {
-                            busy("Testing your path… (~15s)")
-                        } else if !model.diagHops.isEmpty {
-                            ForEach(model.diagHops) { h in
-                                HStack(spacing: 10) {
-                                    Text(h.tag).font(.system(size: 11, weight: .bold, design: .monospaced))
-                                        .foregroundColor(tagColor(h.tag)).frame(width: 40, alignment: .leading)
-                                    Text(h.name).font(.system(size: 12)).frame(width: 110, alignment: .leading)
-                                    Text(h.detail).font(.system(size: 12, design: .monospaced)).foregroundColor(.secondary)
-                                    Spacer()
-                                }
-                            }
-                            verdictBox(model.diagVerdict)
-                        } else {
-                            Text("Choppy call? Find out if it's you or the other end.").font(.system(size: 12)).foregroundColor(.secondary)
-                        }
-                        Button(action: { model.runDiagnosis() }) {
-                            Text(model.diagHops.isEmpty ? "Run call-quality check" : "Run again").frame(maxWidth: .infinity)
-                        }.controlSize(.large).disabled(model.diagRunning)
-                    }
-                    Divider()
-
-                    // Speed test
-                    section("SPEED TEST", trailing: model.speedCheckedAt.map { relative($0) }) {
-                        if model.speedRunning {
-                            busy("Measuring throughput… (~15s)")
-                        } else if model.speedDown != nil || model.speedUp != nil {
-                            row { metric("↓ Download", model.speedDown ?? "—"); metric("↑ Upload", model.speedUp ?? "—") }
-                            if let r = model.speedResp { metric("Responsiveness", r).padding(.top, 2) }
-                        } else {
-                            Text("Measure real download/upload throughput.").font(.system(size: 12)).foregroundColor(.secondary)
-                        }
-                        Button(action: { model.runSpeedTest() }) {
-                            Text(model.speedDown == nil ? "Run speed test" : "Run again").frame(maxWidth: .infinity)
-                        }.controlSize(.large).disabled(model.speedRunning)
-                    }
-                }
-            }
-
-            Divider()
-            HStack {
-                Button("Refresh") { model.tick() }
-                Spacer()
-                Button("Wi-Fi settings…") { model.openWifiSettings() }
-            }
-            .controlSize(.small)
-            .padding(12)
-        }
-        .frame(width: 460, height: 680, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
     }
 
-    func section<C: View>(_ title: String, trailing: String? = nil, @ViewBuilder _ content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(title).font(.system(size: 10, weight: .bold)).foregroundColor(.secondary)
-                Spacer()
-                if let t = trailing { Text(t).font(.system(size: 10)).foregroundColor(.secondary) }
-            }
-            content()
+    func cardHeader(_ title: String, trailing: String? = nil) -> some View {
+        HStack {
+            Text(title).font(.system(size: 13, weight: .semibold))
+            Spacer()
+            if let t = trailing { Text(t).font(.system(size: 10)).foregroundColor(.secondary) }
         }
-        .padding(16)
     }
 
-    func row<C: View>(@ViewBuilder _ content: () -> C) -> some View {
-        HStack(spacing: 24) { content() }
-    }
-
-    func metric(_ k: String, _ v: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(k).font(.system(size: 10)).foregroundColor(.secondary)
-            Text(v).font(.system(size: 13, design: .monospaced))
+    func stat(_ k: String, _ v: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(k).font(.system(size: 9, weight: .semibold)).tracking(0.5).foregroundColor(.secondary)
+            Text(v).font(.system(size: 16, weight: .semibold, design: .rounded))
         }
-        .frame(width: 180, alignment: .leading)
     }
 
     func busy(_ t: String) -> some View {
         HStack(spacing: 8) { ProgressView().scaleEffect(0.6); Text(t).font(.system(size: 12)).foregroundColor(.secondary) }
     }
 
+    func primaryButton(_ title: String, running: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).font(.system(size: 13, weight: .semibold)).frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent).tint(ACCENT).controlSize(.large).disabled(running)
+    }
+
     @ViewBuilder func verdictBox(_ v: String) -> some View {
-        let (c, t): (Color, String) = {
+        let (c, icon, t): (Color, String, String) = {
             switch v {
-            case "local":  return (RED, "Likely YOU — your wifi/local link. Move closer, try 5GHz, or reconnect.")
-            case "bloat":  return (RED, "Bufferbloat — something is saturating your link. Pause big downloads/uploads.")
-            case "remote": return (AMBER, "Your ISP / upstream path is degraded. Local link is clean.")
-            default:        return (GREEN, "Your side is clean — most likely the other participant or the call server.")
+            case "local":  return (RED, "wifi.exclamationmark", "Likely you — your wifi/local link. Move closer, try 5GHz, or reconnect.")
+            case "bloat":  return (RED, "speedometer", "Bufferbloat — something is saturating your link. Pause big transfers.")
+            case "remote": return (AMBER, "network", "Your ISP / upstream path is degraded. Local link is clean.")
+            default:        return (GREEN, "checkmark.circle.fill", "Your side is clean — most likely the other end or the call server.")
             }
         }()
-        Text(t).font(.system(size: 12)).padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(c.opacity(0.15)).cornerRadius(8)
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon).foregroundColor(c)
+            Text(t).font(.system(size: 12))
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(c.opacity(0.13), in: RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -364,9 +458,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let model = WifiModel()
     func applicationDidFinishLaunching(_ note: Notification) {
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 680),
-            styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
+            contentRect: NSRect(x: 0, y: 0, width: 430, height: 660),
+            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
+            backing: .buffered, defer: false)
         window.title = "WiFi Health"
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = true
         window.center()
         window.contentView = NSHostingView(rootView: DashboardView().environmentObject(model))
         window.makeKeyAndOrderFront(nil)

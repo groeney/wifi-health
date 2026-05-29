@@ -81,8 +81,15 @@ info "Cache → $ICONS_DIR"
 info "Installing helper scripts…"
 cp "$SCRIPT_DIR/src/wifi-actions.sh"  "$HELPER_DIR/wifi-actions.sh"
 cp "$SCRIPT_DIR/src/diagnose-call.sh" "$HELPER_DIR/diagnose-call.sh"
-chmod +x "$HELPER_DIR/wifi-actions.sh" "$HELPER_DIR/diagnose-call.sh"
-info "Helpers → $HELPER_DIR/{wifi-actions,diagnose-call}.sh"
+cp "$SCRIPT_DIR/src/wifi-update.sh"   "$HELPER_DIR/wifi-update.sh"
+chmod +x "$HELPER_DIR/wifi-actions.sh" "$HELPER_DIR/diagnose-call.sh" "$HELPER_DIR/wifi-update.sh"
+info "Helpers → $HELPER_DIR/{wifi-actions,diagnose-call,wifi-update}.sh"
+
+# Record where this repo lives so the Dashboard can self-update later.
+printf 'REPO=%q\nINSTALLED_COMMIT=%s\n' "$SCRIPT_DIR" \
+    "$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+    > "$HELPER_DIR/install-info"
+rm -f "$HELPER_DIR/.update-cache"   # fresh install == current
 
 # ── Install plugin ──────────────────────────────────────────────────
 info "Installing SwiftBar plugin…"

@@ -3,6 +3,19 @@
 # Refreshes every 10 seconds. Heavy checks (ping, captive portal,
 # known-network scan) run at most once every 5 minutes; their results
 # are persisted in a state file so each cycle stays cheap.
+#
+# ── SwiftBar plugin metadata (drives the About box + hides cruft) ────
+# <xbar.title>WiFi Health</xbar.title>
+# <xbar.version>v1.0</xbar.version>
+# <xbar.author>James Groeneveld</xbar.author>
+# <xbar.author.github>groeney</xbar.author.github>
+# <xbar.desc>Your wifi's mood ring. Tells you if the connection is good, meh, or doomed — and whether the choppy call is your fault or theirs. (It's usually theirs.)</xbar.desc>
+# <xbar.dependencies>bash,swift</xbar.dependencies>
+# <xbar.abouturl>https://github.com/groeney/wifi-health</xbar.abouturl>
+# <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
+# <swiftbar.hideSwiftBar>true</swiftbar.hideSwiftBar>
+# <swiftbar.hideDisablePlugin>false</swiftbar.hideDisablePlugin>
+# <swiftbar.hideLastUpdated>true</swiftbar.hideLastUpdated>
 
 HELPER_DIR="$HOME/Library/Application Support/SwiftBar"
 HELPER="$HELPER_DIR/wifi-info"

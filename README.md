@@ -41,11 +41,22 @@ The installer will:
 
 ## Update
 
+The Dashboard checks GitHub for a newer version (at most every 6 hours)
+and shows an **Update available** banner with a one-click **Update now**
+button — it runs `git pull` in your clone, rebuilds everything, and
+relaunches. No background daemons; the check only runs while the
+Dashboard is open.
+
+Prefer the terminal? Both of these do the same `git pull` + reinstall:
+
 ```bash
-bash update.sh
+bash update.sh        # from your clone
+# or
+"$HOME/Library/Application Support/SwiftBar/wifi-update.sh" apply
 ```
 
-Pulls latest from git and re-runs the installer.
+(Updates need the original clone to still exist — its path is recorded
+at install time in `install-info`.)
 
 ## Uninstall
 
