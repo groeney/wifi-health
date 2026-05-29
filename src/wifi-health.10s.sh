@@ -464,17 +464,20 @@ fi
 
 echo "---"
 
-# ── Details — raw metrics, collapsed into a submenu ─────────────────
+# ── Key metrics at the top level — the at-a-glance "check things out"
+#    view. The deeper/nerdier readings go in the Details submenu. ─────
 RATE_IN=$(format_rate "$BYTES_IN_RATE")
 RATE_OUT=$(format_rate "$BYTES_OUT_RATE")
-echo "Details | size=12"
-echo "-- ↓ Down:      ${RATE_IN}/s | font=Menlo size=12"
-echo "-- ↑ Up:        ${RATE_OUT}/s | font=Menlo size=12"
+echo "↓ Down:      ${RATE_IN}/s | font=Menlo size=12"
+echo "↑ Up:        ${RATE_OUT}/s | font=Menlo size=12"
 if [ -n "$LATENCY_AVG" ]; then
-    echo "-- Latency:     ${LATENCY_AVG} ms (±${LATENCY_JITTER}) | font=Menlo size=12"
-    echo "-- Loss:        ${PACKET_LOSS}% | font=Menlo size=12"
+    echo "Latency:     ${LATENCY_AVG} ms (±${LATENCY_JITTER}) | font=Menlo size=12"
+    echo "Loss:        ${PACKET_LOSS}% | font=Menlo size=12"
 fi
-echo "-- Signal:      ${RSSI} dBm | font=Menlo size=12"
+echo "Signal:      ${RSSI} dBm | font=Menlo size=12"
+
+echo "---"
+echo "Details | size=12"
 echo "-- Noise:       ${NOISE} dBm | font=Menlo size=12"
 echo "-- SNR:         ${SNR} dB | font=Menlo size=12"
 echo "-- Channel:     ${CHANNEL} ($BAND) | font=Menlo size=12"
