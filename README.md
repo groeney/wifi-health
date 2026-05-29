@@ -18,9 +18,10 @@ slot and stay flush together regardless of SwiftBar's inter-item
 spacing.
 
 Click the icon for a compact menu: the headline status plus any
-actionable recommendations up top, with raw metrics (**Details**), the
-call-quality diagnosis (**Call quality**), and tools (**More**) tucked
-into submenus you open only when you want them.
+actionable recommendations, with raw metrics (**Details**) and tools
+(**More**) tucked into submenus. **Advanced & call quality…** pops out a
+native window with live metrics and the call-quality diagnosis (see
+below) — kept out of the menu so it stays lean.
 
 ## Install
 
@@ -94,17 +95,18 @@ The dropdown shows clickable remediations when they're relevant:
 | 🔓 **Open login page** | Captive portal detected, or no internet | Opens `http://<gateway-ip>/` (DNS-free, works even when the portal blocks DNS) plus Apple's captive detection URL as backup |
 | 📶 **Switch to [network]** | On a hotspot with a known wifi network in range | Joins the known network (password comes from keychain) |
 | 🔄 **Reconnect wifi** | No internet, or high packet loss | Toggles wifi off/on — fixes stuck DHCP leases and stale routes |
-| **Diagnose call quality** | Always available | Runs a ~15s probe in the background and shows the result **right in the dropdown** — per-hop loss/jitter plus an "is it you?" verdict. See below. |
+| **Advanced & call quality…** | Always available | Pops out a native window with live metrics and a call-quality check (per-hop loss/jitter + an "is it you?" verdict). See below. |
 | **Run speed test…** | Always available | Runs Apple's `networkQuality` test in Terminal (10-20s) |
 | **Wi-Fi settings…** | Always available | Opens the Wi-Fi pane in System Settings |
 
 ### "Is it me?" — diagnosing a bad video call
 
-Click **Diagnose call quality** — it runs a ~15s probe in the background
-(no Terminal window) and renders the result back in the dropdown: a
-per-hop loss/jitter breakdown and a plain verdict. (Reopen the menu once
-after clicking; the probe outlives a single 10s refresh.) `bash
-src/diagnose-call.sh` prints the same thing as a terminal report.
+Open **Advanced & call quality…** from the menu — a native window
+(`src/dashboard.swift`, compiled into `WifiHealth.app` at install) with
+live metrics and a **Run call-quality check** button. The button runs a
+~15s probe and shows the per-hop breakdown + verdict right there, live —
+no Terminal, no menu refresh dance. `bash src/diagnose-call.sh` still
+prints the same thing as a terminal report.
 
 A choppy call can be your wifi, your ISP, a saturated link, or the far
 end (the other person / the call server). We can't see their connection,

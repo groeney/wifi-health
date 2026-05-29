@@ -16,6 +16,7 @@ rm -f "$PLUGIN_DIR/wifi-activity.5s.sh"    # older split-plugin layout
 rm -f "$PLUGIN_DIR/wifi-health.5m.sh"      # older filename
 rm -f "$HELPER_DIR/wifi-info"
 rm -f "$HELPER_DIR/gen-icon"
+rm -rf "$HELPER_DIR/WifiHealth.app"
 rm -f "$HELPER_DIR/wifi-actions.sh"
 rm -f "$HELPER_DIR/diagnose-call.sh"
 rm -f "$HELPER_DIR/wifi-health.state"

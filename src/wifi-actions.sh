@@ -8,6 +8,13 @@ ACTION="$1"
 shift
 
 case "$ACTION" in
+    dashboard)
+        # Launch the advanced pop-out via `open` so it runs fully
+        # detached from SwiftBar (own process/session) — buttons inside
+        # it work and it survives after the click returns.
+        open "$HELPER_DIR/WifiHealth.app"
+        ;;
+
     diagnose)
         # Run the call-quality probe in the background and surface the
         # result inside the menu bar dropdown (no Terminal window).

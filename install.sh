@@ -37,6 +37,34 @@ info "Compiling gen-icon helper…"
 swiftc -O -o "$HELPER_DIR/gen-icon" "$SCRIPT_DIR/src/gen-icon.swift"
 info "Binary → $HELPER_DIR/gen-icon"
 
+# ── Build the advanced pop-out app ──────────────────────────────────
+# A native AppKit/SwiftUI window (live metrics + call-quality check).
+# Assembled into a .app bundle so the menu can launch it with `open`,
+# fully detached from SwiftBar. Compiled locally — no notarization.
+info "Building advanced dashboard app…"
+APP="$HELPER_DIR/WifiHealth.app"
+rm -rf "$APP"
+mkdir -p "$APP/Contents/MacOS"
+swiftc -O -o "$APP/Contents/MacOS/WifiHealth" "$SCRIPT_DIR/src/dashboard.swift"
+cat > "$APP/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>WiFi Health</string>
+  <key>CFBundleDisplayName</key><string>WiFi Health</string>
+  <key>CFBundleIdentifier</key><string>com.groeney.wifihealth.dashboard</string>
+  <key>CFBundleExecutable</key><string>WifiHealth</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleVersion</key><string>1.0</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>
+PLIST
+info "Dashboard → $APP"
+
 # ── Icons cache ─────────────────────────────────────────────────────
 # The plugin renders icons on-demand via gen-icon and caches them in
 # this directory keyed by (color, down-level, up-level). Clear stale
