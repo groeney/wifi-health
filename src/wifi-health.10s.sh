@@ -486,19 +486,13 @@ fi
 echo "Signal:      ${RSSI} dBm | font=Menlo size=12 color=$FG"
 
 echo "---"
+# The Dashboard is the home for anything interactive (speed test, call
+# quality, settings) — it can show progress; a menu just closes on click.
+echo "Open Dashboard… | shell=\"$ACTIONS\" param1=dashboard terminal=false size=13 color=$FG"
+
+# Deeper, rarely-needed readings stay one hover away.
 echo "Details | size=12"
 echo "-- Noise:       ${NOISE} dBm | font=Menlo size=12 color=$FG"
 echo "-- SNR:         ${SNR} dB | font=Menlo size=12 color=$FG"
 echo "-- Channel:     ${CHANNEL} ($BAND) | font=Menlo size=12 color=$FG"
 echo "-- Link Speed:  ${TX_RATE} Mbps | font=Menlo size=12 color=$FG"
-
-# ── Advanced view — pops out the rich widget (live detail + the
-#    call-quality diagnosis with a Run button that actually works). ───
-echo "Advanced & call quality… | shell=\"$ACTIONS\" param1=dashboard terminal=false size=12"
-
-# ── More — tools, collapsed into a submenu ──────────────────────────
-echo "More | size=12"
-echo "-- Run speed test… | shell=\"$ACTIONS\" param1=speed-test terminal=false size=12"
-echo "-- Wi-Fi settings… | shell=\"$ACTIONS\" param1=settings terminal=false size=12"
-echo "-- Re-check connectivity now | shell=\"$ACTIONS\" param1=recheck terminal=false refresh=true size=12"
-echo "-- Refresh | refresh=true size=12"

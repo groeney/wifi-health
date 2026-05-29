@@ -1,8 +1,9 @@
-// dashboard.swift — the "Advanced" pop-out window for wifi-health.
+// dashboard.swift — the "Dashboard" pop-out window for wifi-health.
 //
 // A small native AppKit + SwiftUI app: live connection metrics plus the
-// call-quality diagnosis with a Run button that actually works (the app
-// owns its own subprocesses, unlike a SwiftBar menu action).
+// interactive tests (call quality, speed test) that need real progress
+// feedback — things a menu can't do. Buttons work because the app owns
+// its own subprocesses (unlike a SwiftBar menu action).
 //
 // Launched via `open WifiHealth.app` from the pared-down SwiftBar menu.
 // Compiled locally by install.sh — no notarization needed.
@@ -37,11 +38,9 @@ extension Color {
     init(hex: String) {
         let s = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
         let v = UInt64(s, radix: 16) ?? 0
-        self = Color(
-            red: Double((v >> 16) & 0xFF) / 255,
-            green: Double((v >> 8) & 0xFF) / 255,
-            blue: Double(v & 0xFF) / 255
-        )
+        self = Color(red: Double((v >> 16) & 0xFF) / 255,
+                     green: Double((v >> 8) & 0xFF) / 255,
+                     blue: Double(v & 0xFF) / 255)
     }
 }
 
@@ -49,40 +48,54 @@ let GREEN = Color(hex: "4CAF50")
 let AMBER = Color(hex: "FF9800")
 let RED   = Color(hex: "F44336")
 
+func tagColor(_ tag: String) -> Color {
+    switch tag { case "WARN": return AMBER; case "BAD": return RED; case "NA": return .secondary; default: return GREEN }
+}
+
+func relative(_ d: Date) -> String {
+    let s = Int(Date().timeIntervalSince(d))
+    if s < 5 { return "just now" }
+    if s < 60 { return "\(s)s ago" }
+    if s < 3600 { return "\(s / 60)m ago" }
+    return "\(s / 3600)h ago"
+}
+
 // ── Model ───────────────────────────────────────────────────────────
 final class WifiModel: ObservableObject {
     @Published var ssid = "—"
     @Published var rssi = 0
     @Published var noise = 0
     @Published var snr = 0
+    @Published var txRate = 0
     @Published var channel = "—"
     @Published var band = "—"
-    @Published var txRate = 0
     @Published var downRate = 0
     @Published var upRate = 0
     @Published var latency: Int? = nil
     @Published var jitter: Int? = nil
     @Published var loss: Int? = nil
     @Published var online = true
+    @Published var lastUpdate = Date()
 
-    struct Hop: Identifiable {
-        let id = UUID()
-        let name: String
-        let tag: String      // OK / WARN / BAD / NA
-        let detail: String
-    }
+    struct Hop: Identifiable { let id = UUID(); let name: String; let tag: String; let detail: String }
     @Published var diagRunning = false
     @Published var diagHops: [Hop] = []
-    @Published var diagVerdict = ""     // local / bloat / remote / clean
+    @Published var diagVerdict = ""
     @Published var diagCheckedAt: Date? = nil
+
+    @Published var speedRunning = false
+    @Published var speedDown: String? = nil
+    @Published var speedUp: String? = nil
+    @Published var speedResp: String? = nil
+    @Published var speedCheckedAt: Date? = nil
 
     private let iface = CWWiFiClient.shared().interface()
     private var lastIn = 0, lastOut = 0
     private var lastSample = Date()
     private var timer: Timer?
-    private let helperDir = (NSString(string: "~/Library/Application Support/SwiftBar").expandingTildeInPath)
-    var diagScript: String { helperDir + "/diagnose-call.sh" }
-    var resultFile: String { helperDir + "/diagnose.result" }
+    private let helperDir = NSString(string: "~/Library/Application Support/SwiftBar").expandingTildeInPath
+    private var diagScript: String { helperDir + "/diagnose-call.sh" }
+    private var resultFile: String { helperDir + "/diagnose.result" }
 
     func start() {
         tick()
@@ -90,23 +103,18 @@ final class WifiModel: ObservableObject {
     }
 
     func tick() {
-        readWifi()
-        sampleThroughput()
-        pingAsync()
+        readWifi(); sampleThroughput(); pingAsync()
+        lastUpdate = Date()
     }
 
     private func readWifi() {
         guard let i = iface else { return }
         ssid = i.ssid() ?? "—"
-        rssi = i.rssiValue()
-        noise = i.noiseMeasurement()
-        snr = rssi - noise
+        rssi = i.rssiValue(); noise = i.noiseMeasurement(); snr = rssi - noise
         txRate = Int(i.transmitRate())
         if let ch = i.wlanChannel() {
             channel = "\(ch.channelNumber)"
-            switch ch.channelBand.rawValue {
-            case 1: band = "2.4GHz"; case 2: band = "5GHz"; case 3: band = "6GHz"; default: band = "—"
-            }
+            switch ch.channelBand.rawValue { case 1: band = "2.4GHz"; case 2: band = "5GHz"; case 3: band = "6GHz"; default: band = "—" }
         }
     }
 
@@ -138,20 +146,13 @@ final class WifiModel: ObservableObject {
                 }
                 if let s = out.range(of: "= [0-9./]+ ms", options: .regularExpression) {
                     let nums = out[s].dropFirst(2).split(separator: " ")[0].split(separator: "/")
-                    if nums.count >= 4 {
-                        lat = Int(Double(nums[1]) ?? 0)
-                        jit = Int(Double(nums[3]) ?? 0)
-                    }
+                    if nums.count >= 4 { lat = Int(Double(nums[1]) ?? 0); jit = Int(Double(nums[3]) ?? 0) }
                 }
             }
-            DispatchQueue.main.async {
-                self?.online = on
-                self?.latency = lat; self?.jitter = jit; self?.loss = los
-            }
+            DispatchQueue.main.async { self?.online = on; self?.latency = lat; self?.jitter = jit; self?.loss = los }
         }
     }
 
-    // Overall status → (color, label, message)
     var status: (Color, String, String) {
         if !online { return (RED, "No internet", "Connected to wifi but can't reach the web") }
         let l = loss ?? 0, lt = latency ?? 0, jt = jitter ?? 0
@@ -160,19 +161,17 @@ final class WifiModel: ObservableObject {
         return (GREEN, "Good", "You're good")
     }
 
+    // ── Call quality ────────────────────────────────────────────────
     func runDiagnosis() {
         guard !diagRunning else { return }
-        diagRunning = true
-        diagHops = []
+        diagRunning = true; diagHops = []
         DispatchQueue.global().async { [weak self] in
             guard let self = self else { return }
             _ = runCmd("/bin/bash", [self.diagScript, "--widget"])
             let parsed = self.parseResult()
             DispatchQueue.main.async {
-                self.diagHops = parsed.hops
-                self.diagVerdict = parsed.verdict
-                self.diagCheckedAt = Date()
-                self.diagRunning = false
+                self.diagHops = parsed.hops; self.diagVerdict = parsed.verdict
+                self.diagCheckedAt = Date(); self.diagRunning = false
             }
         }
     }
@@ -182,17 +181,13 @@ final class WifiModel: ObservableObject {
         var map: [String: String] = [:]
         for line in text.split(separator: "\n") {
             let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
-            if parts.count == 2 {
-                map[parts[0]] = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-            }
+            if parts.count == 2 { map[parts[0]] = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "\"")) }
         }
         func hop(_ key: String, _ label: String) -> Hop? {
             guard let raw = map[key] else { return nil }
             let f = raw.split(separator: " ").map(String.init)
             guard f.count >= 4 else { return nil }
-            if key == "DIAG_BLOAT" {
-                return Hop(name: label, tag: f[0], detail: "+\(f[3])ms under load")
-            }
+            if key == "DIAG_BLOAT" { return Hop(name: label, tag: f[0], detail: "+\(f[3])ms under load") }
             return Hop(name: label, tag: f[0], detail: "\(f[1])% loss · \(f[2])ms · ±\(f[3])ms")
         }
         var hops: [Hop] = []
@@ -202,13 +197,35 @@ final class WifiModel: ObservableObject {
         if let h = hop("DIAG_BLOAT", "Bufferbloat") { hops.append(h) }
         return (hops, map["DIAG_VERDICT"] ?? "")
     }
+
+    // ── Speed test (networkQuality) ─────────────────────────────────
+    func runSpeedTest() {
+        guard !speedRunning else { return }
+        speedRunning = true; speedDown = nil; speedUp = nil; speedResp = nil
+        DispatchQueue.global().async { [weak self] in
+            let out = runCmd("/usr/bin/networkQuality", [])
+            func grab(_ label: String) -> String? {
+                for line in out.split(separator: "\n") where line.contains(label) {
+                    if let v = line.split(separator: ":").last { return v.trimmingCharacters(in: .whitespaces) }
+                }
+                return nil
+            }
+            let down = grab("Downlink capacity"), up = grab("Uplink capacity"), resp = grab("Responsiveness")
+            DispatchQueue.main.async {
+                self?.speedDown = down; self?.speedUp = up; self?.speedResp = resp
+                self?.speedCheckedAt = Date(); self?.speedRunning = false
+            }
+        }
+    }
+
+    func openWifiSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.wifi-settings-extension") {
+            NSWorkspace.shared.open(url)
+        }
+    }
 }
 
 // ── View ────────────────────────────────────────────────────────────
-func tagColor(_ tag: String) -> Color {
-    switch tag { case "WARN": return AMBER; case "BAD": return RED; case "NA": return .secondary; default: return GREEN }
-}
-
 struct DashboardView: View {
     @EnvironmentObject var model: WifiModel
 
@@ -223,75 +240,95 @@ struct DashboardView: View {
                     Text("\(label) — \(msg)").font(.system(size: 11)).foregroundColor(.secondary)
                 }
                 Spacer()
-            }
-            .padding(16)
-            Divider()
-
-            // Live metrics
-            VStack(alignment: .leading, spacing: 8) {
-                Text("LIVE").font(.system(size: 10, weight: .bold)).foregroundColor(.secondary)
-                HStack(spacing: 24) {
-                    metric("↓ Down", humanRate(model.downRate))
-                    metric("↑ Up", humanRate(model.upRate))
-                }
-                HStack(spacing: 24) {
-                    metric("Latency", model.latency.map { "\($0) ms (±\(model.jitter ?? 0))" } ?? "—")
-                    metric("Loss", model.loss.map { "\($0)%" } ?? "—")
-                }
-                HStack(spacing: 24) {
-                    metric("Signal", "\(model.rssi) dBm")
-                    metric("SNR", "\(model.snr) dB")
-                }
-                HStack(spacing: 24) {
-                    metric("Channel", "\(model.channel) (\(model.band))")
-                    metric("Link", "\(model.txRate) Mbps")
+                VStack(alignment: .trailing, spacing: 2) {
+                    HStack(spacing: 4) {
+                        Circle().fill(GREEN).frame(width: 6, height: 6)
+                        Text("live").font(.system(size: 10)).foregroundColor(.secondary)
+                    }
+                    Text("updated \(relative(model.lastUpdate))").font(.system(size: 9)).foregroundColor(.secondary)
                 }
             }
             .padding(16)
             Divider()
 
-            // Call quality
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("CALL QUALITY").font(.system(size: 10, weight: .bold)).foregroundColor(.secondary)
-                    Spacer()
-                    if let t = model.diagCheckedAt {
-                        Text(relative(t)).font(.system(size: 10)).foregroundColor(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    // Live metrics
+                    section("LIVE") {
+                        row { metric("↓ Down", humanRate(model.downRate)); metric("↑ Up", humanRate(model.upRate)) }
+                        row { metric("Latency", model.latency.map { "\($0) ms (±\(model.jitter ?? 0))" } ?? "—"); metric("Loss", model.loss.map { "\($0)%" } ?? "—") }
+                        row { metric("Signal", "\(model.rssi) dBm"); metric("SNR", "\(model.snr) dB") }
+                        row { metric("Channel", "\(model.channel) (\(model.band))"); metric("Link", "\(model.txRate) Mbps") }
                     }
-                }
+                    Divider()
 
-                if model.diagRunning {
-                    HStack(spacing: 8) {
-                        ProgressView().scaleEffect(0.6)
-                        Text("Testing your path… (~15s)").font(.system(size: 12)).foregroundColor(.secondary)
-                    }
-                } else if !model.diagHops.isEmpty {
-                    ForEach(model.diagHops) { h in
-                        HStack(spacing: 10) {
-                            Text(h.tag).font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(tagColor(h.tag)).frame(width: 40, alignment: .leading)
-                            Text(h.name).font(.system(size: 12)).frame(width: 110, alignment: .leading)
-                            Text(h.detail).font(.system(size: 12, design: .monospaced)).foregroundColor(.secondary)
-                            Spacer()
+                    // Call quality
+                    section("CALL QUALITY", trailing: model.diagCheckedAt.map { relative($0) }) {
+                        if model.diagRunning {
+                            busy("Testing your path… (~15s)")
+                        } else if !model.diagHops.isEmpty {
+                            ForEach(model.diagHops) { h in
+                                HStack(spacing: 10) {
+                                    Text(h.tag).font(.system(size: 11, weight: .bold, design: .monospaced))
+                                        .foregroundColor(tagColor(h.tag)).frame(width: 40, alignment: .leading)
+                                    Text(h.name).font(.system(size: 12)).frame(width: 110, alignment: .leading)
+                                    Text(h.detail).font(.system(size: 12, design: .monospaced)).foregroundColor(.secondary)
+                                    Spacer()
+                                }
+                            }
+                            verdictBox(model.diagVerdict)
+                        } else {
+                            Text("Choppy call? Find out if it's you or the other end.").font(.system(size: 12)).foregroundColor(.secondary)
                         }
+                        Button(action: { model.runDiagnosis() }) {
+                            Text(model.diagHops.isEmpty ? "Run call-quality check" : "Run again").frame(maxWidth: .infinity)
+                        }.controlSize(.large).disabled(model.diagRunning)
                     }
-                    verdictBox(model.diagVerdict)
-                } else {
-                    Text("Choppy call? Find out if it's you or the other end.")
-                        .font(.system(size: 12)).foregroundColor(.secondary)
-                }
+                    Divider()
 
-                Button(action: { model.runDiagnosis() }) {
-                    Text(model.diagHops.isEmpty ? "Run call-quality check" : "Run again")
-                        .frame(maxWidth: .infinity)
+                    // Speed test
+                    section("SPEED TEST", trailing: model.speedCheckedAt.map { relative($0) }) {
+                        if model.speedRunning {
+                            busy("Measuring throughput… (~15s)")
+                        } else if model.speedDown != nil || model.speedUp != nil {
+                            row { metric("↓ Download", model.speedDown ?? "—"); metric("↑ Upload", model.speedUp ?? "—") }
+                            if let r = model.speedResp { metric("Responsiveness", r).padding(.top, 2) }
+                        } else {
+                            Text("Measure real download/upload throughput.").font(.system(size: 12)).foregroundColor(.secondary)
+                        }
+                        Button(action: { model.runSpeedTest() }) {
+                            Text(model.speedDown == nil ? "Run speed test" : "Run again").frame(maxWidth: .infinity)
+                        }.controlSize(.large).disabled(model.speedRunning)
+                    }
                 }
-                .controlSize(.large)
-                .disabled(model.diagRunning)
             }
-            .padding(16)
-            Spacer(minLength: 0)
+
+            Divider()
+            HStack {
+                Button("Refresh") { model.tick() }
+                Spacer()
+                Button("Wi-Fi settings…") { model.openWifiSettings() }
+            }
+            .controlSize(.small)
+            .padding(12)
         }
-        .frame(width: 460, height: 600, alignment: .topLeading)
+        .frame(width: 460, height: 680, alignment: .topLeading)
+    }
+
+    func section<C: View>(_ title: String, trailing: String? = nil, @ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title).font(.system(size: 10, weight: .bold)).foregroundColor(.secondary)
+                Spacer()
+                if let t = trailing { Text(t).font(.system(size: 10)).foregroundColor(.secondary) }
+            }
+            content()
+        }
+        .padding(16)
+    }
+
+    func row<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+        HStack(spacing: 24) { content() }
     }
 
     func metric(_ k: String, _ v: String) -> some View {
@@ -299,7 +336,11 @@ struct DashboardView: View {
             Text(k).font(.system(size: 10)).foregroundColor(.secondary)
             Text(v).font(.system(size: 13, design: .monospaced))
         }
-        .frame(width: 170, alignment: .leading)
+        .frame(width: 180, alignment: .leading)
+    }
+
+    func busy(_ t: String) -> some View {
+        HStack(spacing: 8) { ProgressView().scaleEffect(0.6); Text(t).font(.system(size: 12)).foregroundColor(.secondary) }
     }
 
     @ViewBuilder func verdictBox(_ v: String) -> some View {
@@ -311,19 +352,9 @@ struct DashboardView: View {
             default:        return (GREEN, "Your side is clean — most likely the other participant or the call server.")
             }
         }()
-        Text(t)
-            .font(.system(size: 12))
-            .padding(10)
+        Text(t).font(.system(size: 12)).padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(c.opacity(0.15))
-            .cornerRadius(8)
-    }
-
-    func relative(_ d: Date) -> String {
-        let s = Int(Date().timeIntervalSince(d))
-        if s < 60 { return "checked just now" }
-        if s < 3600 { return "checked \(s / 60)m ago" }
-        return "checked \(s / 3600)h ago"
+            .background(c.opacity(0.15)).cornerRadius(8)
     }
 }
 
@@ -333,10 +364,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let model = WifiModel()
     func applicationDidFinishLaunching(_ note: Notification) {
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 600),
-            styleMask: [.titled, .closable, .miniaturizable],
-            backing: .buffered, defer: false
-        )
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 680),
+            styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         window.title = "WiFi Health"
         window.center()
         window.contentView = NSHostingView(rootView: DashboardView().environmentObject(model))
