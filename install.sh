@@ -45,6 +45,8 @@ ICONS_DIR="$HELPER_DIR/icons"
 info "Resetting icon cache…"
 rm -rf "$ICONS_DIR"
 mkdir -p "$ICONS_DIR"
+# Drop any stale state/result files from previous versions.
+rm -f "$HELPER_DIR/diagnose.result"
 info "Cache → $ICONS_DIR"
 
 # ── Install helper scripts ──────────────────────────────────────────

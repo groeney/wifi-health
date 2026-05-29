@@ -19,6 +19,7 @@ rm -f "$HELPER_DIR/gen-icon"
 rm -f "$HELPER_DIR/wifi-actions.sh"
 rm -f "$HELPER_DIR/diagnose-call.sh"
 rm -f "$HELPER_DIR/wifi-health.state"
+rm -f "$HELPER_DIR/diagnose.result"
 rm -rf "$HELPER_DIR/icons"
 
 info "Done. SwiftBar itself was left in place."

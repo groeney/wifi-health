@@ -9,18 +9,14 @@ shift
 
 case "$ACTION" in
     diagnose)
-        # Open a Terminal and run the call-quality decomposition. No
-        # trailing `read`/`exit` — that pause hung when the prompt didn't
-        # render. The script just runs and returns to the shell prompt;
-        # the window stays open so the verdict stays readable, and the
-        # user closes it (Cmd-W) when done.
-        DIAG="$HELPER_DIR/diagnose-call.sh"
-        osascript <<APPLESCRIPT
-tell application "Terminal"
-    activate
-    do script "bash '$DIAG'"
-end tell
-APPLESCRIPT
+        # Run the call-quality probe in the background and surface the
+        # result inside the menu bar dropdown (no Terminal window).
+        # Mark "running" synchronously so the immediate refresh shows
+        # progress, then launch the probe detached — it writes the
+        # structured result file when done (~15s later).
+        RESULT="$HELPER_DIR/diagnose.result"
+        printf 'DIAG_STATUS=running\nDIAG_START=%s\n' "$(date +%s)" > "$RESULT"
+        nohup "$HELPER_DIR/diagnose-call.sh" --widget >/dev/null 2>&1 &
         ;;
 
     portal)

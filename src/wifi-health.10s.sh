@@ -488,8 +488,46 @@ if [ "$ACT_PORTAL" -eq 1 ] || [ "$ACT_RECONNECT" -eq 1 ] || [ -n "$ACT_SWITCH" ]
     fi
 fi
 
+# ── Call-quality diagnosis (on-demand, shown in-dropdown) ───────────
 echo "---"
-echo "Diagnose call quality… | shell=\"$ACTIONS\" param1=diagnose terminal=false size=11 color=#888888"
+DIAG_STATUS=""; DIAG_START=0; DIAG_END=0; DIAG_VERDICT=""
+DIAG_RTR=""; DIAG_CF=""; DIAG_GG=""; DIAG_BLOAT=""
+[ -f "$HELPER_DIR/diagnose.result" ] && . "$HELPER_DIR/diagnose.result"
+diag_now=$(date +%s)
+
+diag_color() { case "$1" in WARN) echo "#FF9800";; BAD) echo "#F44336";; NA) echo "#888888";; *) echo "#4CAF50";; esac; }
+
+if [ "$DIAG_STATUS" = "running" ] && [ $(( diag_now - DIAG_START )) -lt 90 ]; then
+    echo "Diagnosing call quality… $(( diag_now - DIAG_START ))s | size=11 color=#888888"
+    echo "↻ Reopen this menu in a few seconds for the result | size=11 color=#888888"
+elif [ "$DIAG_STATUS" = "done" ] && [ $(( diag_now - DIAG_END )) -lt 900 ]; then
+    age=$(( diag_now - DIAG_END ))
+    if   [ "$age" -lt 60 ];   then agestr="just now"
+    elif [ "$age" -lt 3600 ]; then agestr="$(( age / 60 ))m ago"
+    else                           agestr="$(( age / 3600 ))h ago"; fi
+    echo "Call quality — checked $agestr | size=11 color=#888888"
+    for entry in "Router (local)|$DIAG_RTR" "Internet|$DIAG_CF" "Google/Meet|$DIAG_GG"; do
+        lbl="${entry%%|*}"; read -r t l a j <<< "${entry#*|}"
+        [ "$t" = "NA" ] && t="--"
+        printf '%-4s %-13s %s%% loss · %sms · ±%sms | font=Menlo size=12 color=%s\n' \
+            "$t" "$lbl" "$l" "$a" "$j" "$(diag_color "$t")"
+    done
+    read -r bt bi bl bd <<< "$DIAG_BLOAT"
+    printf '%-4s %-13s +%sms under load | font=Menlo size=12 color=%s\n' \
+        "$bt" "Bufferbloat" "$bd" "$(diag_color "$bt")"
+    case "$DIAG_VERDICT" in
+        local)  echo "⚡ Likely YOU — your wifi/local link. Move closer, try 5GHz, reconnect | color=#F44336 size=12" ;;
+        bloat)  echo "⚡ Bufferbloat — something's saturating your link (check the arrows) | color=#F44336 size=12" ;;
+        remote) echo "→ Your ISP / upstream path is degraded | color=#FF9800 size=12" ;;
+        *)      echo "✓ Your side is clean — likely the other end or the call server | color=#4CAF50 size=12" ;;
+    esac
+    echo "↻ Run call-quality test again | shell=\"$ACTIONS\" param1=diagnose terminal=false refresh=true size=11 color=#888888"
+else
+    echo "Diagnose call quality | shell=\"$ACTIONS\" param1=diagnose terminal=false refresh=true size=12"
+    echo "↳ Choppy call — is it me or them? (~15s check) | size=11 color=#888888"
+fi
+
+echo "---"
 echo "Run speed test… | shell=\"$ACTIONS\" param1=speed-test terminal=false size=11 color=#888888"
 echo "Wi-Fi settings… | shell=\"$ACTIONS\" param1=settings terminal=false size=11 color=#888888"
 echo "Re-check connectivity now | shell=\"$ACTIONS\" param1=recheck terminal=false refresh=true size=11 color=#888888"
