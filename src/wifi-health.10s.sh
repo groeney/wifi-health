@@ -442,9 +442,18 @@ else
     # Fallback — gen-icon missing or failed.
     echo "● | size=14 color=$COLOR"
 fi
+# SwiftBar dims rows that have no action (the metric/header lines),
+# which is low-contrast. Set an explicit text color that adapts to
+# light/dark so those rows render crisp like the clickable ones.
+if defaults read -g AppleInterfaceStyle 2>/dev/null | grep -qi dark; then
+    FG="#f5f5f7"; FG_DIM="#aeaeb2"
+else
+    FG="#1d1d1f"; FG_DIM="#6e6e73"
+fi
+
 echo "---"
-echo "$SSID_DISPLAY — $LABEL | size=14"
-echo "$MSG | size=11 color=#888888"
+echo "$SSID_DISPLAY — $LABEL | size=14 color=$FG"
+echo "$MSG | size=11 color=$FG_DIM"
 
 # Actionable recommendations + one-click fixes stay at the top level —
 # they only appear when there's actually something to act on.
@@ -468,20 +477,20 @@ echo "---"
 #    view. The deeper/nerdier readings go in the Details submenu. ─────
 RATE_IN=$(format_rate "$BYTES_IN_RATE")
 RATE_OUT=$(format_rate "$BYTES_OUT_RATE")
-echo "↓ Down:      ${RATE_IN}/s | font=Menlo size=12"
-echo "↑ Up:        ${RATE_OUT}/s | font=Menlo size=12"
+echo "↓ Down:      ${RATE_IN}/s | font=Menlo size=12 color=$FG"
+echo "↑ Up:        ${RATE_OUT}/s | font=Menlo size=12 color=$FG"
 if [ -n "$LATENCY_AVG" ]; then
-    echo "Latency:     ${LATENCY_AVG} ms (±${LATENCY_JITTER}) | font=Menlo size=12"
-    echo "Loss:        ${PACKET_LOSS}% | font=Menlo size=12"
+    echo "Latency:     ${LATENCY_AVG} ms (±${LATENCY_JITTER}) | font=Menlo size=12 color=$FG"
+    echo "Loss:        ${PACKET_LOSS}% | font=Menlo size=12 color=$FG"
 fi
-echo "Signal:      ${RSSI} dBm | font=Menlo size=12"
+echo "Signal:      ${RSSI} dBm | font=Menlo size=12 color=$FG"
 
 echo "---"
 echo "Details | size=12"
-echo "-- Noise:       ${NOISE} dBm | font=Menlo size=12"
-echo "-- SNR:         ${SNR} dB | font=Menlo size=12"
-echo "-- Channel:     ${CHANNEL} ($BAND) | font=Menlo size=12"
-echo "-- Link Speed:  ${TX_RATE} Mbps | font=Menlo size=12"
+echo "-- Noise:       ${NOISE} dBm | font=Menlo size=12 color=$FG"
+echo "-- SNR:         ${SNR} dB | font=Menlo size=12 color=$FG"
+echo "-- Channel:     ${CHANNEL} ($BAND) | font=Menlo size=12 color=$FG"
+echo "-- Link Speed:  ${TX_RATE} Mbps | font=Menlo size=12 color=$FG"
 
 # ── Advanced view — pops out the rich widget (live detail + the
 #    call-quality diagnosis with a Run button that actually works). ───
