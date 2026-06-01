@@ -479,7 +479,8 @@ if [ ${#RECS[@]} -gt 0 ]; then
             echo "→ ${RECS[$i]} | color=#FF9800 size=12"
         fi
     done
-    [ "$ACT_PORTAL" -eq 1 ] && echo "🔓 Open login page | shell=\"$ACTIONS\" param1=portal terminal=false size=12"
+    [ "$ACT_PORTAL" -eq 1 ] && echo "🔓 Open login page (Safari) | shell=\"$ACTIONS\" param1=portal terminal=false size=12"
+    [ "$ACT_PORTAL" -eq 1 ] && echo "⌨️ Fix portal from Terminal | shell=\"$ACTIONS\" param1=portal-terminal terminal=false size=12"
     [ -n "$ACT_SWITCH" ] && echo "📶 Switch to $ACT_SWITCH | shell=\"$ACTIONS\" param1=switch param2=\"$ACT_SWITCH\" terminal=false refresh=true size=12"
     [ "$ACT_RECONNECT" -eq 1 ] && echo "🔄 Reconnect wifi | shell=\"$ACTIONS\" param1=reconnect terminal=false refresh=true size=12"
 fi

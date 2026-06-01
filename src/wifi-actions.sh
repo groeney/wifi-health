@@ -27,38 +27,60 @@ case "$ACTION" in
         ;;
 
     portal)
-        # Force a captive portal to show its login screen.
+        # Get a captive portal's login screen to actually load.
         #
-        # Three-pronged strategy to handle different portal behaviors:
+        # The hard case (e.g. Caltrain): the network blocks DNS for
+        # everything except its own portal domain, and the user's default
+        # browser is Chrome — whose Secure DNS (DoH) and HTTPS-First mode
+        # bypass the portal's DNS interception and force https://, which
+        # portals can't serve. Result: DNS_PROBE / CONNECTION_REFUSED.
         #
-        # 1. Open the default gateway IP directly. This is the most
-        #    reliable approach because it bypasses DNS entirely — and
-        #    DNS is *frequently* blocked by transit/airport portals
-        #    (confirmed on Caltrain wifi). The gateway is the device
-        #    running the portal, so http://<gateway>/ reaches it
-        #    even when nothing resolves.
-        #
-        # 2. Also open Apple's captive detection URL with a cache-buster.
-        #    Works when DNS is functional but the network only intercepts
-        #    well-known detection endpoints. macOS uses this URL itself,
-        #    so portals that want to be Mac-friendly will intercept it.
-        #
-        # 3. Best-effort nudge the Captive Network Assistant for cases
-        #    where macOS hasn't yet detected the portal on its own.
+        # Strategy:
+        #   1. Discover the portal's real login URL by reading the redirect
+        #      the network returns for a plain-HTTP probe to the gateway IP
+        #      (DNS-free), falling back to Apple's detection URL.
+        #   2. Open it in SAFARI, not the default browser — Safari uses the
+        #      system resolver and plain HTTP, so the portal can intercept
+        #      and redirect it. This is the key fix for the Chrome failure.
+        #   3. Nudge macOS's Captive Network Assistant as a backstop.
         ts=$(date +%s)
-
-        # Method 1: gateway IP (DNS-free, the Caltrain case)
         gateway=$(route -n get default 2>/dev/null | awk '/gateway:/ {print $2}')
+
+        # 1. Discover the portal URL from the redirect Location (DNS-free).
+        portal_url=""
         if [ -n "$gateway" ]; then
-            open "http://$gateway/?_=$ts"
+            portal_url=$(curl -s -m 4 -o /dev/null -w '%{redirect_url}' "http://$gateway/?_=$ts" 2>/dev/null)
+        fi
+        if [ -z "$portal_url" ]; then
+            portal_url=$(curl -s -m 4 -o /dev/null -w '%{redirect_url}' "http://captive.apple.com/hotspot-detect.html?_=$ts" 2>/dev/null)
         fi
 
-        # Method 2: Apple's captive detection URL (DNS-required fallback)
-        open "http://captive.apple.com/hotspot-detect.html?_=$ts"
+        # 2. Open in Safari (system DNS + plain HTTP, portal-friendly).
+        if [ -n "$portal_url" ]; then
+            open -a Safari "$portal_url"
+        elif [ -n "$gateway" ]; then
+            open -a Safari "http://$gateway/?_=$ts"
+        else
+            open -a Safari "http://captive.apple.com/hotspot-detect.html?_=$ts"
+        fi
 
-        # Method 3: Captive Network Assistant (silent if unsupported)
+        # 3. Captive Network Assistant (silent if unsupported).
         CNA="/System/Library/CoreServices/Captive Network Assistant.app"
         [ -d "$CNA" ] && open -a "$CNA" 2>/dev/null &
+        ;;
+
+    portal-terminal)
+        # Browser-independent path: diagnose the portal and attempt a
+        # terminal sign-in over plain HTTP. Runs in Terminal so the
+        # diagnostic readout is visible (it explains *why* if it can't
+        # — e.g. auth server down, or a JavaScript-only portal).
+        DIAG="$HELPER_DIR/wifi-portal.sh"
+        osascript <<APPLESCRIPT
+tell application "Terminal"
+    activate
+    do script "bash '$DIAG' login"
+end tell
+APPLESCRIPT
         ;;
 
     reconnect)

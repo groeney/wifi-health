@@ -103,7 +103,8 @@ The dropdown shows clickable remediations when they're relevant:
 
 | Action | When it shows | What it does |
 |--------|--------------|--------------|
-| 🔓 **Open login page** | Captive portal detected, or no internet | Opens `http://<gateway-ip>/` (DNS-free, works even when the portal blocks DNS) plus Apple's captive detection URL as backup |
+| 🔓 **Open login page (Safari)** | Captive portal detected, or no internet | Discovers the portal's real login URL (DNS-free, via the gateway redirect) and opens it in **Safari** — Safari uses the system resolver and plain HTTP, where Chrome's Secure DNS / HTTPS-First mode break portals |
+| ⌨️ **Fix portal from Terminal** | Captive portal detected, or no internet | Browser-independent: `wifi-portal.sh` probes the portal over raw HTTP/HTTPS, reports what's reachable, and best-effort submits a simple accept form. When it *can't*, it says why (auth server down, or a JavaScript-only portal) |
 | 📶 **Switch to [network]** | On a hotspot with a known wifi network in range | Joins the known network (password comes from keychain) |
 | 🔄 **Reconnect wifi** | No internet, or high packet loss | Toggles wifi off/on — fixes stuck DHCP leases and stale routes |
 | **Advanced & call quality…** | Always available | Pops out a native window with live metrics and a call-quality check (per-hop loss/jitter + an "is it you?" verdict). See below. |
