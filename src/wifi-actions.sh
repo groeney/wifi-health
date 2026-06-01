@@ -128,6 +128,18 @@ end tell
 APPLESCRIPT
         ;;
 
+    fix-dns)
+        # Flush the DNS cache + resolve via Cloudflare 1.1.1.1 — fixes a stale
+        # negative cache (e.g. a hotspot resolver holding NXDOMAIN for a freshly
+        # created hostname). Logic lives in the fix-dns.sh helper.
+        "$HELPER_DIR/fix-dns.sh" --gui
+        ;;
+
+    dns-auto)
+        # Revert Wi-Fi DNS to automatic / DHCP (undo fix-dns).
+        "$HELPER_DIR/fix-dns.sh" --revert
+        ;;
+
     *)
         echo "Unknown action: $ACTION" >&2
         exit 1

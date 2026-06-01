@@ -503,6 +503,7 @@ echo "---"
 # The Dashboard is the home for anything interactive (speed test, call
 # quality, settings) — it can show progress; a menu just closes on click.
 echo "Open Dashboard… | shell=\"$ACTIONS\" param1=dashboard terminal=false size=13 color=$FG"
+echo "🧹 Fix DNS (flush + Cloudflare 1.1.1.1) | shell=\"$ACTIONS\" param1=fix-dns terminal=false refresh=true size=13 color=$FG"
 
 # Deeper, rarely-needed readings stay one hover away.
 echo "Details | size=12"
@@ -510,3 +511,4 @@ echo "-- Noise:       ${NOISE} dBm | font=Menlo size=12 color=$FG"
 echo "-- SNR:         ${SNR} dB | font=Menlo size=12 color=$FG"
 echo "-- Channel:     ${CHANNEL} ($BAND) | font=Menlo size=12 color=$FG"
 echo "-- Link Speed:  ${TX_RATE} Mbps | font=Menlo size=12 color=$FG"
+echo "-- Revert DNS to automatic (DHCP) | shell=\"$ACTIONS\" param1=dns-auto terminal=false refresh=true size=12 color=$FG"

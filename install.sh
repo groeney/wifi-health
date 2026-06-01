@@ -83,8 +83,9 @@ cp "$SCRIPT_DIR/src/wifi-actions.sh"  "$HELPER_DIR/wifi-actions.sh"
 cp "$SCRIPT_DIR/src/diagnose-call.sh" "$HELPER_DIR/diagnose-call.sh"
 cp "$SCRIPT_DIR/src/wifi-update.sh"   "$HELPER_DIR/wifi-update.sh"
 cp "$SCRIPT_DIR/src/wifi-portal.sh"   "$HELPER_DIR/wifi-portal.sh"
-chmod +x "$HELPER_DIR/wifi-actions.sh" "$HELPER_DIR/diagnose-call.sh" "$HELPER_DIR/wifi-update.sh" "$HELPER_DIR/wifi-portal.sh"
-info "Helpers → $HELPER_DIR/{wifi-actions,diagnose-call,wifi-update,wifi-portal}.sh"
+cp "$SCRIPT_DIR/src/fix-dns.sh"       "$HELPER_DIR/fix-dns.sh"
+chmod +x "$HELPER_DIR/wifi-actions.sh" "$HELPER_DIR/diagnose-call.sh" "$HELPER_DIR/wifi-update.sh" "$HELPER_DIR/wifi-portal.sh" "$HELPER_DIR/fix-dns.sh"
+info "Helpers → $HELPER_DIR/{wifi-actions,diagnose-call,wifi-update,wifi-portal,fix-dns}.sh"
 
 # Record where this repo lives so the Dashboard can self-update later.
 printf 'REPO=%q\nINSTALLED_COMMIT=%s\n' "$SCRIPT_DIR" \
