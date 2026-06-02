@@ -15,7 +15,7 @@
 # <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
 # <swiftbar.hideSwiftBar>true</swiftbar.hideSwiftBar>
 # <swiftbar.hideDisablePlugin>false</swiftbar.hideDisablePlugin>
-# <swiftbar.hideLastUpdated>true</swiftbar.hideLastUpdated>
+# <swiftbar.hideLastUpdated>false</swiftbar.hideLastUpdated>
 
 HELPER_DIR="$HOME/Library/Application Support/SwiftBar"
 HELPER="$HELPER_DIR/wifi-info"

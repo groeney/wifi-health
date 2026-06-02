@@ -45,10 +45,11 @@ probe_host() {
     [ "$HTTPS_CODE" = "000" ] && HTTPS_CODE="refused/timeout"
 }
 
+GW_HTTP=""; GW_REDIR=""
 print_probe() {
     echo "${bold}${cyn}captive portal probe${rst}"
     local gw url ip
-    gw=$(gateway); echo "  gateway:  ${gw:-none}"
+    gw=$(gateway); echo "  gateway:       ${gw:-none}"
     if online; then echo "  ${grn}already online — no portal in the way.${rst}"; return 1; fi
     url=$(discover)
     if [ -z "$url" ]; then echo "  ${red}no portal redirect found — the network may be down.${rst}"; return 1; fi
@@ -56,11 +57,17 @@ print_probe() {
     PORTAL_HOST=$(echo "$url" | sed -E 's#https?://([^/]+).*#\1#')
     AUTH_PATH=$(echo "$url" | sed -E 's#https?://[^/]+##'); [ -z "$AUTH_PATH" ] && AUTH_PATH="/"
     ip=$(host -W 2 "$PORTAL_HOST" 2>/dev/null | awk '/has address/{print $4; exit}')
-    echo "  portal:   $url"
-    echo "  host:     $PORTAL_HOST  ${dim}(${ip:-does not resolve})${rst}"
+    # The gateway IP is the source of truth — it answers even when the
+    # portal hostname doesn't resolve (which varies car-to-car).
+    GW_HTTP=$(curl -s -m 6 -A "$UA" -o /dev/null -w '%{http_code}' "http://$gw/" 2>/dev/null)
+    GW_REDIR=$(curl -s -m 6 -A "$UA" -o /dev/null -w '%{redirect_url}' "http://$gw/" 2>/dev/null)
+    [ "$GW_HTTP" = "000" ] && GW_HTTP="refused/timeout"
+    echo "  gateway http:  ${GW_HTTP}${GW_REDIR:+  → $GW_REDIR}"
+    echo "  redirects to:  $url"
+    echo "  portal host:   $PORTAL_HOST  ${dim}(${ip:-does not resolve})${rst}"
     probe_host "$PORTAL_HOST"
-    echo "  http://:  $HTTP_CODE"
-    echo "  https://: $HTTPS_CODE"
+    echo "  host http://:  $HTTP_CODE"
+    echo "  host https://: $HTTPS_CODE"
     return 0
 }
 
@@ -90,12 +97,17 @@ case "${1:-probe}" in
 
   dump)
     print_probe || exit 0
+    gw=$(gateway)
     echo
-    echo "${bold}Raw portal page over HTTP${rst} ${dim}(share this so the login flow can be tuned)${rst}"
-    body=$(fetch_http) || { echo "${red}couldn't load over plain HTTP.${rst}"; exit 1; }
-    echo "  from: $FETCHED_URL"
-    echo "  ---"
-    printf '%s\n' "$body" | head -60
+    echo "${bold}Gateway HTTP headers${rst} ${dim}(the 302 Location / cookies reveal the real flow)${rst}"
+    curl -sS -i -m 6 -A "$UA" "http://$gw/" 2>/dev/null | head -20
+    echo
+    echo "${bold}Auth path over plain HTTP${rst} ${dim}(http://$gw$AUTH_PATH)${rst}"
+    curl -sS -i -m 6 --proto-redir =http -A "$UA" "http://$gw$AUTH_PATH" 2>/dev/null | head -20
+    echo
+    echo "${bold}Portal page body (HTTP)${rst} ${dim}(share this to tune the login flow)${rst}"
+    body=$(fetch_http) && { echo "  from: $FETCHED_URL"; echo "  ---"; printf '%s\n' "$body" | head -50; } \
+        || echo "  ${red}no body served over plain HTTP — portal only answers on the dead HTTPS port.${rst}"
     ;;
 
   login)
