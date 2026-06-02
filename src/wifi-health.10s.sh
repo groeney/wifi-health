@@ -45,6 +45,14 @@ SSID=$(networksetup -getairportnetwork en0 2>/dev/null | sed 's/Current Wi-Fi Ne
 [ -z "$SSID" ] && SSID="Unknown"
 SNR=$((RSSI - NOISE))
 
+# Is Wi-Fi DNS pinned to a custom resolver? Pinned public DNS (e.g.
+# 1.1.1.1) silently breaks captive-portal sign-in: the portal can't
+# intercept your lookups, and on a walled network the public resolver
+# is unreachable until you authenticate — so every name fails.
+DNS_PINNED=""
+_dns=$(networksetup -getdnsservers Wi-Fi 2>/dev/null)
+echo "$_dns" | grep -qE '^[0-9a-fA-F]+[.:]' && DNS_PINNED=$(echo "$_dns" | paste -sd' ' -)
+
 # ── State ───────────────────────────────────────────────────────────
 RECS=()
 LEVS=()
@@ -62,6 +70,19 @@ HTTPS_BROKEN=0
 ACT_PORTAL=0
 ACT_RECONNECT=0
 ACT_SWITCH=""
+ACT_DNS_AUTO=0
+
+# Cloudflare WARP (a VPN) tunnels DNS — behind a captive portal it blocks
+# sign-in entirely. Detect it so we can flag/pause it.
+WARP_INSTALLED=0
+WARP_ON=0
+WARP=$(command -v warp-cli 2>/dev/null || echo /usr/local/bin/warp-cli)
+if [ -x "$WARP" ]; then
+    WARP_INSTALLED=1
+    "$WARP" status 2>/dev/null | grep -qi "connected" && WARP_ON=1
+fi
+WE_PAUSED_WARP=0
+[ -f "$HELPER_DIR/.warp-paused" ] && WE_PAUSED_WARP=1
 
 BYTES_IN_RATE=0
 BYTES_OUT_RATE=0
@@ -146,6 +167,13 @@ measure_internet_and_latency() {
 
 interpret_internet_and_latency() {
     if [ "$NO_INTERNET" -eq 1 ]; then
+        # Pinned public DNS is the #1 self-inflicted cause of "can't get
+        # past the captive portal" — surface it first.
+        if [ -n "$DNS_PINNED" ]; then
+            RECS+=("DNS is pinned to $DNS_PINNED — this blocks captive-portal sign-in. Switch to automatic")
+            LEVS+=("high")
+            ACT_DNS_AUTO=1
+        fi
         RECS+=("No internet — try a hotspot, sign in to the network, or find another connection")
         LEVS+=("high")
         ACT_PORTAL=1
@@ -479,6 +507,7 @@ if [ ${#RECS[@]} -gt 0 ]; then
             echo "→ ${RECS[$i]} | color=#FF9800 size=12"
         fi
     done
+    [ "$ACT_DNS_AUTO" -eq 1 ] && echo "↩️ Switch to automatic DNS (unblocks portals) | shell=\"$ACTIONS\" param1=dns-auto terminal=false refresh=true size=12"
     [ "$ACT_PORTAL" -eq 1 ] && echo "🔓 Open login page (Safari) | shell=\"$ACTIONS\" param1=portal terminal=false size=12"
     [ "$ACT_PORTAL" -eq 1 ] && echo "⌨️ Fix portal from Terminal | shell=\"$ACTIONS\" param1=portal-terminal terminal=false size=12"
     [ -n "$ACT_SWITCH" ] && echo "📶 Switch to $ACT_SWITCH | shell=\"$ACTIONS\" param1=switch param2=\"$ACT_SWITCH\" terminal=false refresh=true size=12"
@@ -503,7 +532,6 @@ echo "---"
 # The Dashboard is the home for anything interactive (speed test, call
 # quality, settings) — it can show progress; a menu just closes on click.
 echo "Open Dashboard… | shell=\"$ACTIONS\" param1=dashboard terminal=false size=13 color=$FG"
-echo "🧹 Fix DNS (flush + Cloudflare 1.1.1.1) | shell=\"$ACTIONS\" param1=fix-dns terminal=false refresh=true size=13 color=$FG"
 
 # Deeper, rarely-needed readings stay one hover away.
 echo "Details | size=12"
@@ -511,4 +539,9 @@ echo "-- Noise:       ${NOISE} dBm | font=Menlo size=12 color=$FG"
 echo "-- SNR:         ${SNR} dB | font=Menlo size=12 color=$FG"
 echo "-- Channel:     ${CHANNEL} ($BAND) | font=Menlo size=12 color=$FG"
 echo "-- Link Speed:  ${TX_RATE} Mbps | font=Menlo size=12 color=$FG"
-echo "-- Revert DNS to automatic (DHCP) | shell=\"$ACTIONS\" param1=dns-auto terminal=false refresh=true size=12 color=$FG"
+echo "-- DNS:         ${DNS_PINNED:+$DNS_PINNED (pinned)}${DNS_PINNED:-automatic (DHCP)} | font=Menlo size=12 color=$FG"
+if [ -n "$DNS_PINNED" ]; then
+    echo "-- ↩️ Switch DNS back to automatic | shell=\"$ACTIONS\" param1=dns-auto terminal=false refresh=true size=12 color=$FG"
+else
+    echo "-- 🧹 Fix DNS (flush + pin to 1.1.1.1) | shell=\"$ACTIONS\" param1=fix-dns terminal=false refresh=true size=12 color=$FG"
+fi

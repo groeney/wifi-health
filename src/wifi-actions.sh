@@ -136,8 +136,16 @@ APPLESCRIPT
         ;;
 
     dns-auto)
-        # Revert Wi-Fi DNS to automatic / DHCP (undo fix-dns).
-        "$HELPER_DIR/fix-dns.sh" --revert
+        # Revert Wi-Fi DNS to automatic / DHCP (undo fix-dns). Try without
+        # an admin prompt first — that works for admin users (the common
+        # case) and keeps the fix one frictionless click; fall back to the
+        # helper's privileged path only if it's refused.
+        if networksetup -setdnsservers Wi-Fi Empty 2>/dev/null; then
+            dscacheutil -flushcache 2>/dev/null
+            osascript -e 'display notification "Wi-Fi DNS back to automatic (DHCP)" with title "DNS reverted"' 2>/dev/null
+        else
+            "$HELPER_DIR/fix-dns.sh" --revert
+        fi
         ;;
 
     *)
