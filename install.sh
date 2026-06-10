@@ -37,6 +37,10 @@ info "Compiling gen-icon helper…"
 swiftc -O -o "$HELPER_DIR/gen-icon" "$SCRIPT_DIR/src/gen-icon.swift"
 info "Binary → $HELPER_DIR/gen-icon"
 
+info "Compiling gen-chart helper…"
+swiftc -O -o "$HELPER_DIR/gen-chart" "$SCRIPT_DIR/src/gen-chart.swift"
+info "Binary → $HELPER_DIR/gen-chart"
+
 # ── Build the advanced pop-out app ──────────────────────────────────
 # A native AppKit/SwiftUI window (live metrics + call-quality check).
 # Assembled into a .app bundle so the menu can launch it with `open`,
@@ -58,7 +62,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleVersion</key><string>1.0</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
-  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
 </dict>
 </plist>
@@ -73,8 +77,10 @@ ICONS_DIR="$HELPER_DIR/icons"
 info "Resetting icon cache…"
 rm -rf "$ICONS_DIR"
 mkdir -p "$ICONS_DIR"
-# Drop any stale state/result files from previous versions.
-rm -f "$HELPER_DIR/diagnose.result"
+# Drop any stale state/result files from previous versions. The 24h
+# history log (history.csv) is intentionally preserved across installs
+# — it's the user's data; the sparkline cache regenerates from it.
+rm -f "$HELPER_DIR/diagnose.result" "$HELPER_DIR/sparkline.b64" "$HELPER_DIR/dot.state"
 info "Cache → $ICONS_DIR"
 
 # ── Install helper scripts ──────────────────────────────────────────

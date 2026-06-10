@@ -24,6 +24,14 @@ ICONS_DIR="$HELPER_DIR/icons"
 STATE_FILE="$HELPER_DIR/wifi-health.state"
 HEAVY_INTERVAL=300
 
+# Rolling 24h observation log — one CSV row per cycle:
+#   epoch,status,online,lat,jit,loss,rssi,noise,tx,down,up
+# status: g/y/r mirror the dot color, "off" = wifi off. Pruned to the
+# last 24h on heavy cycles; the menu sparkline and the Dashboard's
+# history card both read from it.
+HISTORY_FILE="$HELPER_DIR/history.csv"
+SPARK_FILE="$HELPER_DIR/sparkline.b64"
+
 if [ ! -x "$HELPER" ]; then
     echo "● | size=14 color=#999999"
     echo "---"
@@ -35,6 +43,7 @@ fi
 eval "$("$HELPER")"
 
 if [ "$STATUS" != "on" ]; then
+    echo "$(date +%s),off,0,,,,,,,," >> "$HISTORY_FILE"
     echo "● | size=14 color=#999999"
     echo "---"
     echo "WiFi is off"
@@ -354,15 +363,44 @@ check_hotspot
 sample_throughput
 
 # Connection QUALITY (reachability, loss, jitter, latency) is probed
-# EVERY cycle — never cached — so the dot reacts within ~10s when a
-# path goes choppy mid-call. These outputs are reset then re-measured.
+# EVERY cycle — never cached. These outputs are reset then re-measured.
 NO_INTERNET=0
 LATENCY_AVG=""; LATENCY_JITTER=""; PACKET_LOSS=""
 measure_internet_and_latency
 
+# Raw values from THIS cycle's 5 pings — logged to history and shown
+# in Details. Too noisy to judge the dot on directly: one slow ping
+# swings a 5-ping stddev by ±20ms, which made the dot flap g↔y every
+# few cycles.
+RAW_LAT="$LATENCY_AVG"; RAW_JIT="$LATENCY_JITTER"; RAW_LOSS="$PACKET_LOSS"
+
+# Judge quality on a ~90s rolling window instead (this cycle + recent
+# history ≈ 45 pings): latency/loss = window mean, jitter = window
+# median — a lone outlier cycle can't move a median. NO_INTERNET is
+# exempt from smoothing: losing connectivity is certain, not noisy,
+# and must stay instant.
+NOW=$(date +%s)
+if [ -n "$LATENCY_AVG" ] && [ -f "$HISTORY_FILE" ]; then
+    read -r LATENCY_AVG LATENCY_JITTER PACKET_LOSS < <(awk -F, \
+        -v cut=$((NOW - 90)) -v lat="$LATENCY_AVG" -v jit="$LATENCY_JITTER" -v loss="$PACKET_LOSS" '
+        $1 >= cut && $4 != "" { n++; lats[n] = $4; jits[n] = $5; losses[n] = $6 }
+        END {
+            n++; lats[n] = lat; jits[n] = jit; losses[n] = loss
+            latS = 0; lossS = 0
+            for (i = 1; i <= n; i++) { latS += lats[i]; lossS += losses[i] }
+            for (i = 2; i <= n; i++) {              # insertion sort (n ≤ ~10)
+                v = jits[i] + 0; j = i - 1
+                while (j > 0 && jits[j] + 0 > v) { jits[j+1] = jits[j]; j-- }
+                jits[j+1] = v
+            }
+            printf "%d %d %d\n", latS / n, jits[int((n + 1) / 2)], lossS / n
+        }' "$HISTORY_FILE")
+fi
+
 # Heavier, slow-changing checks (captive portal, DNS/HTTPS reachability,
 # scanning for known networks) stay cached for $HEAVY_INTERVAL.
 NOW=$(date +%s)
+DID_HEAVY=0
 if (( NOW - LAST_HEAVY > HEAVY_INTERVAL )); then
     CAPTIVE_DETECTED=0; PORTAL_BLOCKED=0
     DNS_BROKEN=0; HTTPS_BROKEN=0
@@ -372,6 +410,7 @@ if (( NOW - LAST_HEAVY > HEAVY_INTERVAL )); then
     measure_dns_and_https
     measure_known_nearby
     save_state
+    DID_HEAVY=1
 fi
 
 # Interpretations always run, using fresh (quality) or cached (rest) data.
@@ -432,6 +471,68 @@ else
     COLOR="#4CAF50"; LABEL="Good"; MSG="You're good"
 fi
 
+# ── Hysteresis ──────────────────────────────────────────────────────
+# Even a windowed metric can oscillate when it sits right on a
+# threshold. The dot only changes color once the new color wins two
+# consecutive cycles; hard failures (no internet / DNS / HTTPS broken)
+# skip the wait — those are certain, not noisy.
+DOT_STATE="$HELPER_DIR/dot.state"
+PREV_COLOR=""; PREV_LABEL=""; PREV_MSG=""; PEND_COLOR=""; PEND_N=0
+[ -f "$DOT_STATE" ] && . "$DOT_STATE"
+HARD_FAIL=0
+{ [ "$NO_INTERNET" -eq 1 ] || [ "$DNS_BROKEN" -eq 1 ] || [ "$HTTPS_BROKEN" -eq 1 ]; } && HARD_FAIL=1
+if [ "$HARD_FAIL" -eq 0 ] && [ -n "$PREV_COLOR" ] && [ "$COLOR" != "$PREV_COLOR" ]; then
+    if [ "$COLOR" = "$PEND_COLOR" ]; then
+        PEND_N=$((PEND_N + 1))
+    else
+        PEND_COLOR="$COLOR"; PEND_N=1
+    fi
+    if [ "$PEND_N" -lt 2 ]; then
+        COLOR="$PREV_COLOR"; LABEL="$PREV_LABEL"; MSG="$PREV_MSG"
+    fi
+else
+    PEND_COLOR=""; PEND_N=0
+fi
+{
+    printf 'PREV_COLOR=%q\n' "$COLOR"
+    printf 'PREV_LABEL=%q\n' "$LABEL"
+    printf 'PREV_MSG=%q\n'   "$MSG"
+    printf 'PEND_COLOR=%q\n' "$PEND_COLOR"
+    printf 'PEND_N=%q\n'     "$PEND_N"
+} > "$DOT_STATE"
+
+# ── 24h history log ─────────────────────────────────────────────────
+# Append this cycle's observation: RAW per-cycle metrics (the chart
+# should show reality, not the smoothing), status = what the dot
+# showed. Empty fields = not measurable this cycle (e.g. latency
+# while offline).
+case "$COLOR" in
+    "#4CAF50") HIST_ST="g" ;;
+    "#FF9800") HIST_ST="y" ;;
+    *)         HIST_ST="r" ;;
+esac
+HIST_ONLINE=1; [ "$NO_INTERNET" -eq 1 ] && HIST_ONLINE=0
+echo "$NOW,$HIST_ST,$HIST_ONLINE,$RAW_LAT,$RAW_JIT,$RAW_LOSS,$RSSI,$NOISE,$TX_RATE,$BYTES_IN_RATE,$BYTES_OUT_RATE" >> "$HISTORY_FILE"
+
+# Menu text color, light/dark aware (also picks the sparkline palette).
+if defaults read -g AppleInterfaceStyle 2>/dev/null | grep -qi dark; then
+    FG="#f5f5f7"; FG_DIM="#aeaeb2"; APPEARANCE="dark"
+else
+    FG="#1d1d1f"; FG_DIM="#6e6e73"; APPEARANCE="light"
+fi
+
+# On heavy cycles: prune the log to 24h and re-render the menu
+# sparkline (a 5-min-stale 24h chart is indistinguishable from fresh).
+if [ "$DID_HEAVY" -eq 1 ]; then
+    awk -F, -v cut=$((NOW - 86400)) '$1 >= cut' "$HISTORY_FILE" > "$HISTORY_FILE.tmp" \
+        && mv "$HISTORY_FILE.tmp" "$HISTORY_FILE"
+    if [ -x "$HELPER_DIR/gen-chart" ]; then
+        "$HELPER_DIR/gen-chart" "$HISTORY_FILE" "$APPEARANCE" > "$SPARK_FILE.tmp" 2>/dev/null \
+            && mv "$SPARK_FILE.tmp" "$SPARK_FILE" \
+            || rm -f "$SPARK_FILE.tmp"
+    fi
+fi
+
 # ── Activity levels for the icon ────────────────────────────────────
 # Each direction (down, up) gets its own level on a log scale of
 # bandwidth. The icon renderer combines them — thin/small arrow for a
@@ -484,14 +585,7 @@ else
     echo "● | size=14 color=$COLOR"
 fi
 # SwiftBar dims rows that have no action (the metric/header lines),
-# which is low-contrast. Set an explicit text color that adapts to
-# light/dark so those rows render crisp like the clickable ones.
-if defaults read -g AppleInterfaceStyle 2>/dev/null | grep -qi dark; then
-    FG="#f5f5f7"; FG_DIM="#aeaeb2"
-else
-    FG="#1d1d1f"; FG_DIM="#6e6e73"
-fi
-
+# which is low-contrast — FG/FG_DIM (set above) keep them crisp.
 echo "---"
 echo "$SSID_DISPLAY — $LABEL | size=14 color=$FG"
 echo "$MSG | size=11 color=$FG_DIM"
@@ -522,11 +616,27 @@ RATE_IN=$(format_rate "$BYTES_IN_RATE")
 RATE_OUT=$(format_rate "$BYTES_OUT_RATE")
 echo "↓ Down:      ${RATE_IN}/s | font=Menlo size=12 color=$FG"
 echo "↑ Up:        ${RATE_OUT}/s | font=Menlo size=12 color=$FG"
+# Latency/loss are the ~90s windowed values the dot is judged on; the
+# raw current cycle lives in Details.
 if [ -n "$LATENCY_AVG" ]; then
     echo "Latency:     ${LATENCY_AVG} ms (±${LATENCY_JITTER}) | font=Menlo size=12 color=$FG"
     echo "Loss:        ${PACKET_LOSS}% | font=Menlo size=12 color=$FG"
 fi
 echo "Signal:      ${RSSI} dBm | font=Menlo size=12 color=$FG"
+
+# ── 24h sparkline — appears once enough history has accumulated ─────
+if [ -s "$SPARK_FILE" ]; then
+    HIST_SUMMARY=$(awk -F, -v cut=$((NOW - 86400)) '
+        $1 >= cut { n++; if ($3 == 1) up++; if ($4 != "") { s += $4; m++ } }
+        END {
+            if (n == 0) exit
+            printf "online %d%%", up * 100 / n
+            if (m > 0) printf " · avg %.0f ms", s / m
+        }' "$HISTORY_FILE" 2>/dev/null)
+    echo "---"
+    echo "Last 24h${HIST_SUMMARY:+ — $HIST_SUMMARY} | size=11 color=$FG_DIM"
+    echo " | image=$(cat "$SPARK_FILE") shell=\"$ACTIONS\" param1=dashboard terminal=false"
+fi
 
 echo "---"
 # The Dashboard is the home for anything interactive (speed test, call
@@ -535,6 +645,9 @@ echo "Open Dashboard… | shell=\"$ACTIONS\" param1=dashboard terminal=false siz
 
 # Deeper, rarely-needed readings stay one hover away.
 echo "Details | size=12"
+if [ -n "$RAW_LAT" ]; then
+    echo "-- This cycle:  ${RAW_LAT} ms (±${RAW_JIT}) · ${RAW_LOSS}% loss | font=Menlo size=12 color=$FG"
+fi
 echo "-- Noise:       ${NOISE} dBm | font=Menlo size=12 color=$FG"
 echo "-- SNR:         ${SNR} dB | font=Menlo size=12 color=$FG"
 echo "-- Channel:     ${CHANNEL} ($BAND) | font=Menlo size=12 color=$FG"

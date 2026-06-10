@@ -68,11 +68,20 @@ bash uninstall.sh
 
 The plugin refreshes every 10 seconds. **Connection quality**
 (reachability, latency, jitter, packet loss) and the activity meter are
-measured **every cycle** so the dot reacts in real time — e.g. it turns
-yellow/red within ~10s if your path goes choppy mid-call. The slower,
-rarely-changing checks (captive portal, DNS/HTTPS reachability, scanning
-for known networks) run at most once every 5 minutes and are cached in
+measured **every cycle**. The slower, rarely-changing checks (captive
+portal, DNS/HTTPS reachability, scanning for known networks) run at
+most once every 5 minutes and are cached in
 `~/Library/Application Support/SwiftBar/wifi-health.state`.
+
+The dot is judged on a **~90s rolling window** (≈45 pings: latency and
+loss are the window mean, jitter the window median), not on a single
+cycle — a 5-ping jitter estimate is so noisy that one slow ping used to
+flap the dot green↔yellow constantly. On top of that, a **hysteresis**
+rule requires the new color to win two consecutive cycles before the
+dot changes. Hard failures (no internet, DNS/HTTPS broken) bypass both
+and go red within one cycle (~10s). The raw per-cycle numbers are still
+logged to the 24h history (the chart shows reality, not the smoothing)
+and shown under **Details → This cycle**.
 
 Checks:
 
@@ -92,6 +101,32 @@ Checks:
 The most important signal is **end-to-end performance** (latency, jitter, packet loss),
 not the wifi link metrics. A great wifi link to a bad upstream — like a hotspot with
 weak LTE, or a Caltrain network that doesn't route — looks perfect on link metrics alone.
+
+## 24-hour history
+
+Every 10s cycle is also logged to a rolling 24h observation file, so you
+can see how the network you're on actually performed over time — not
+just how it feels right now.
+
+- **Menu** — a compact latency sparkline with a green/amber/red strip
+  underneath (the dot's color, minute by minute) plus an
+  `online % · avg latency` summary. Appears after ~5 minutes of data;
+  clicking it opens the Dashboard.
+- **Dashboard** — a **Last 24 hours** card: online %, median and p95
+  latency, average loss, and a switchable chart (**Latency / Loss /
+  Signal / Speed**) over the full day. Red shading marks stretches with
+  no internet; the strip below the chart is the same status timeline as
+  the menu sparkline.
+
+The log lives at
+`~/Library/Application Support/SwiftBar/history.csv` — one row per
+cycle: `epoch,status,online,lat,jit,loss,rssi,noise,tx,down,up`
+(`status` is `g`/`y`/`r` mirroring the dot, or `off` when wifi is off).
+It's pruned to 24h on the 5-minute heavy cycles and survives
+reinstalls; gaps simply mean the laptop was asleep or SwiftBar wasn't
+running. The menu sparkline is rendered by `src/gen-chart.swift` (same
+PNG-into-the-menu trick as the icon); the Dashboard card reads the CSV
+directly (Swift Charts).
 
 Each check can flag a **high** or **medium** priority recommendation.
 The dot color is determined by combining link quality, end-to-end quality, and

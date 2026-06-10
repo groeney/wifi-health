@@ -10,6 +10,7 @@
 
 import AppKit
 import SwiftUI
+import Charts
 import CoreWLAN
 import Foundation
 
@@ -61,6 +62,53 @@ func relative(_ d: Date) -> String {
     return "\(s / 3600)h ago"
 }
 
+// ── 24h history ─────────────────────────────────────────────────────
+// The SwiftBar plugin appends one CSV row per 10s cycle to history.csv
+// (epoch,status,online,lat,jit,loss,rssi,noise,tx,down,up) and prunes
+// it to 24h. We bucket it into 5-minute bins for charting.
+
+struct HistorySample {
+    let time: Date
+    let status: String        // g / y / r / off
+    let online: Bool
+    let latency: Double?
+    let loss: Double?
+    let rssi: Double?
+    let down: Double?
+    let up: Double?
+}
+
+struct HistoryBucket: Identifiable {
+    let id: Int
+    let time: Date
+    let latency: Double?
+    let loss: Double?
+    let rssi: Double?
+    let down: Double?
+    let up: Double?
+    let status: String?       // worst of g/y/r in the bin, "off", nil = no data
+    let offline: Bool         // any "no internet" sample in the bin
+}
+
+struct OfflineBand: Identifiable {
+    let id: Int
+    let start: Date
+    let end: Date
+}
+
+enum HistMetric: String, CaseIterable, Identifiable {
+    case latency = "Latency", loss = "Loss", signal = "Signal", speed = "Speed"
+    var id: String { rawValue }
+}
+
+private struct HistAcc {
+    var latS = 0.0; var latN = 0
+    var lossS = 0.0; var lossN = 0
+    var rssiS = 0.0; var rssiN = 0
+    var downS = 0.0; var upS = 0.0; var rateN = 0
+    var pri = 0; var off = false
+}
+
 // ── Model ───────────────────────────────────────────────────────────
 final class WifiModel: ObservableObject {
     @Published var ssid = "—"
@@ -93,14 +141,28 @@ final class WifiModel: ObservableObject {
     @Published var updateState = ""        // available / current / unknown
     @Published var updateApplying = false
 
+    @Published var histBuckets: [HistoryBucket] = []
+    @Published var histBands: [OfflineBand] = []
+    @Published var histEnd = Date()
+    @Published var histSamples = 0
+    @Published var histUptime: Int? = nil
+    @Published var histMedian: Int? = nil
+    @Published var histP95: Int? = nil
+    @Published var histAvgLoss: Double? = nil
+
     private let iface = CWWiFiClient.shared().interface()
     private var lastIn = 0, lastOut = 0
     private var lastSample = Date()
     private var timer: Timer?
+    private var ticks = 0
     private let helperDir = NSString(string: "~/Library/Application Support/SwiftBar").expandingTildeInPath
     private var diagScript: String { helperDir + "/diagnose-call.sh" }
     private var resultFile: String { helperDir + "/diagnose.result" }
     private var updateScript: String { helperDir + "/wifi-update.sh" }
+    private var historyFile: String {
+        // Env override lets you point the dashboard at a test dataset.
+        ProcessInfo.processInfo.environment["WIFI_HEALTH_HISTORY"] ?? helperDir + "/history.csv"
+    }
 
     func start() {
         tick()
@@ -110,7 +172,103 @@ final class WifiModel: ObservableObject {
 
     func tick() {
         readWifi(); sampleThroughput(); pingAsync()
+        if ticks % 30 == 0 { loadHistory() }   // every ~60s; plugin only logs every 10s
+        ticks += 1
         lastUpdate = Date()
+    }
+
+    // ── 24h history ─────────────────────────────────────────────────
+    func loadHistory() {
+        let path = historyFile
+        DispatchQueue.global().async { [weak self] in
+            guard let self = self else { return }
+            let end = Date()
+            let start = end.addingTimeInterval(-86400)
+            var samples: [HistorySample] = []
+            if let text = try? String(contentsOfFile: path, encoding: .utf8) {
+                for line in text.split(separator: "\n") {
+                    let f = line.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+                    guard f.count >= 11, let ts = Double(f[0]) else { continue }
+                    let t = Date(timeIntervalSince1970: ts)
+                    guard t >= start, t <= end else { continue }
+                    samples.append(HistorySample(
+                        time: t, status: f[1], online: f[2] == "1",
+                        latency: Double(f[3]), loss: Double(f[5]), rssi: Double(f[6]),
+                        down: Double(f[9]), up: Double(f[10])))
+                }
+            }
+
+            // 5-minute bins.
+            let nB = 288
+            let w = 86400.0 / Double(nB)
+            var accs = [HistAcc](repeating: HistAcc(), count: nB)
+            var offline = [Bool](repeating: false, count: nB)
+            for s in samples {
+                let i = min(nB - 1, max(0, Int(s.time.timeIntervalSince(start) / w)))
+                if let v = s.latency { accs[i].latS += v; accs[i].latN += 1 }
+                if let v = s.loss { accs[i].lossS += v; accs[i].lossN += 1 }
+                if let v = s.rssi, v != 0 { accs[i].rssiS += v; accs[i].rssiN += 1 }
+                if let d = s.down, let u = s.up { accs[i].downS += d; accs[i].upS += u; accs[i].rateN += 1 }
+                if !s.online { offline[i] = true }
+                switch s.status {
+                case "r": accs[i].pri = max(accs[i].pri, 3)
+                case "y": accs[i].pri = max(accs[i].pri, 2)
+                case "g": accs[i].pri = max(accs[i].pri, 1)
+                default:  accs[i].off = true
+                }
+            }
+            var buckets: [HistoryBucket] = []
+            for (i, a) in accs.enumerated() {
+                let st: String?
+                switch a.pri {
+                case 3: st = "r"
+                case 2: st = "y"
+                case 1: st = "g"
+                default: st = a.off ? "off" : nil
+                }
+                buckets.append(HistoryBucket(
+                    id: i, time: start.addingTimeInterval((Double(i) + 0.5) * w),
+                    latency: a.latN > 0 ? a.latS / Double(a.latN) : nil,
+                    loss: a.lossN > 0 ? a.lossS / Double(a.lossN) : nil,
+                    rssi: a.rssiN > 0 ? a.rssiS / Double(a.rssiN) : nil,
+                    down: a.rateN > 0 ? a.downS / Double(a.rateN) : nil,
+                    up: a.rateN > 0 ? a.upS / Double(a.rateN) : nil,
+                    status: st, offline: offline[i]))
+            }
+
+            // Contiguous "no internet" stretches → shaded chart bands.
+            var bands: [OfflineBand] = []
+            var bandStart: Int? = nil
+            for (i, isOff) in offline.enumerated() {
+                if isOff { if bandStart == nil { bandStart = i } }
+                else if let s0 = bandStart {
+                    bands.append(OfflineBand(id: s0,
+                        start: start.addingTimeInterval(Double(s0) * w),
+                        end: start.addingTimeInterval(Double(i) * w)))
+                    bandStart = nil
+                }
+            }
+            if let s0 = bandStart {
+                bands.append(OfflineBand(id: s0,
+                    start: start.addingTimeInterval(Double(s0) * w), end: end))
+            }
+
+            // Headline stats over raw samples (not bins).
+            let lats = samples.compactMap { $0.latency }.sorted()
+            let med = lats.isEmpty ? nil : Int(lats[lats.count / 2])
+            let p95 = lats.isEmpty ? nil : Int(lats[min(lats.count - 1, Int(Double(lats.count) * 0.95))])
+            let losses = samples.compactMap { $0.loss }
+            let avgLoss = losses.isEmpty ? nil : losses.reduce(0, +) / Double(losses.count)
+            let uptime = samples.isEmpty ? nil
+                : Int(Double(samples.filter { $0.online }.count) * 100 / Double(samples.count))
+
+            DispatchQueue.main.async {
+                self.histBuckets = buckets; self.histBands = bands; self.histEnd = end
+                self.histSamples = samples.count
+                self.histUptime = uptime; self.histMedian = med
+                self.histP95 = p95; self.histAvgLoss = avgLoss
+            }
+        }
     }
 
     private func readWifi() {
@@ -257,6 +415,7 @@ final class WifiModel: ObservableObject {
 // ── View ────────────────────────────────────────────────────────────
 struct DashboardView: View {
     @EnvironmentObject var model: WifiModel
+    @State private var histMetric: HistMetric = .latency
 
     var body: some View {
         let (col, label, msg) = model.status
@@ -265,6 +424,7 @@ struct DashboardView: View {
                 if model.updateState == "available" { updateBanner }
                 header(col, label, msg)
                 metricsCard
+                historyCard
                 callQualityCard
                 speedCard
                 footer
@@ -273,7 +433,7 @@ struct DashboardView: View {
             .padding(.top, 34)     // clear the transparent title bar
             .padding(.bottom, 18)
         }
-        .frame(width: 430, height: 660)
+        .frame(width: 430, height: 760)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
@@ -316,6 +476,129 @@ struct DashboardView: View {
                 stat("LINK RATE", "\(model.txRate) Mbps")
             }
         }
+    }
+
+    // History (24h) --------------------------------------------------
+    var historyCard: some View {
+        card {
+            cardHeader("Last 24 hours", trailing: model.histSamples > 0 ? "\(model.histSamples) samples" : nil)
+            if model.histSamples < 6 {
+                Text("Collecting data — the menu bar widget logs a sample every 10 seconds while SwiftBar runs. Check back in a few minutes.")
+                    .font(.system(size: 12)).foregroundColor(.secondary)
+            } else {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 4),
+                          spacing: 12) {
+                    stat("ONLINE", model.histUptime.map { "\($0)%" } ?? "—")
+                    stat("MEDIAN", model.histMedian.map { "\($0) ms" } ?? "—")
+                    stat("P95", model.histP95.map { "\($0) ms" } ?? "—")
+                    stat("AVG LOSS", model.histAvgLoss.map { String(format: "%.1f%%", $0) } ?? "—")
+                }
+                Picker("", selection: $histMetric) {
+                    ForEach(HistMetric.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented).labelsHidden()
+                historyChart.frame(height: 140)
+                statusStrip.frame(height: 6)
+                HStack {
+                    Text("24h ago").font(.system(size: 9)).foregroundColor(.secondary)
+                    Spacer()
+                    Text("now").font(.system(size: 9)).foregroundColor(.secondary)
+                }
+            }
+        }
+    }
+
+    var historyChart: some View {
+        let start = model.histEnd.addingTimeInterval(-86400)
+        return Chart {
+            // Shade the stretches with no internet so dips in the line
+            // read as outages, not data glitches.
+            ForEach(model.histBands) { band in
+                RectangleMark(xStart: .value("From", band.start), xEnd: .value("To", band.end))
+                    .foregroundStyle(RED.opacity(0.08))
+            }
+            ForEach(model.histBuckets) { b in
+                if histMetric == .latency, let v = b.latency {
+                    AreaMark(x: .value("Time", b.time), y: .value("ms", v))
+                        .foregroundStyle(ACCENT.opacity(0.14))
+                        .interpolationMethod(.monotone)
+                    LineMark(x: .value("Time", b.time), y: .value("ms", v))
+                        .foregroundStyle(ACCENT)
+                        .lineStyle(StrokeStyle(lineWidth: 1.5))
+                        .interpolationMethod(.monotone)
+                } else if histMetric == .loss, let v = b.loss {
+                    BarMark(x: .value("Time", b.time), y: .value("%", v), width: 2)
+                        .foregroundStyle(RED.opacity(0.75))
+                } else if histMetric == .signal, let v = b.rssi {
+                    LineMark(x: .value("Time", b.time), y: .value("dBm", v))
+                        .foregroundStyle(AMBER)
+                        .lineStyle(StrokeStyle(lineWidth: 1.5))
+                        .interpolationMethod(.monotone)
+                } else if histMetric == .speed {
+                    if let d = b.down {
+                        LineMark(x: .value("Time", b.time), y: .value("MB/s", d / 1_048_576),
+                                 series: .value("Dir", "Down"))
+                            .foregroundStyle(ACCENT)
+                            .interpolationMethod(.monotone)
+                    }
+                    if let u = b.up {
+                        LineMark(x: .value("Time", b.time), y: .value("MB/s", u / 1_048_576),
+                                 series: .value("Dir", "Up"))
+                            .foregroundStyle(GREEN)
+                            .interpolationMethod(.monotone)
+                    }
+                }
+            }
+        }
+        .chartXScale(domain: start...model.histEnd)
+        .chartYScale(domain: yDomain)
+        .chartXAxis {
+            AxisMarks(values: .stride(by: .hour, count: 6)) { _ in
+                AxisGridLine(); AxisTick()
+                AxisValueLabel(format: .dateTime.hour())
+            }
+        }
+    }
+
+    private var yDomain: ClosedRange<Double> {
+        let b = model.histBuckets
+        switch histMetric {
+        case .latency:
+            let v = b.compactMap { $0.latency }.max() ?? 50
+            return 0...max(50, v * 1.15)
+        case .loss:
+            let v = b.compactMap { $0.loss }.max() ?? 10
+            return 0...max(10, v * 1.15)
+        case .signal:
+            let vals = b.compactMap { $0.rssi }
+            return ((vals.min() ?? -90) - 4)...((vals.max() ?? -30) + 4)
+        case .speed:
+            let v = b.compactMap { bk in [bk.down, bk.up].compactMap { $0 }.max() }.max() ?? 1_048_576
+            return 0...(max(1_048_576, v * 1.15) / 1_048_576)
+        }
+    }
+
+    // The same green/amber/red timeline as the menu sparkline's strip:
+    // what the menu bar dot was showing, minute by minute.
+    var statusStrip: some View {
+        Canvas { ctx, size in
+            let n = model.histBuckets.count
+            guard n > 0 else { return }
+            let w = size.width / CGFloat(n)
+            for b in model.histBuckets {
+                let c: Color
+                switch b.status {
+                case "g": c = GREEN
+                case "y": c = AMBER
+                case "r": c = RED
+                case "off": c = Color.secondary.opacity(0.45)
+                default: c = Color.primary.opacity(0.05)
+                }
+                ctx.fill(Path(CGRect(x: CGFloat(b.id) * w, y: 0, width: w + 0.4, height: size.height)),
+                         with: .color(c))
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 3))
     }
 
     // Call quality --------------------------------------------------
@@ -458,7 +741,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let model = WifiModel()
     func applicationDidFinishLaunching(_ note: Notification) {
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 430, height: 660),
+            contentRect: NSRect(x: 0, y: 0, width: 430, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered, defer: false)
         window.title = "WiFi Health"
