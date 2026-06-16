@@ -50,8 +50,19 @@ if [ "$STATUS" != "on" ]; then
     exit 0
 fi
 
-SSID=$(networksetup -getairportnetwork en0 2>/dev/null | sed 's/Current Wi-Fi Network: //')
-[ -z "$SSID" ] && SSID="Unknown"
+# macOS hides the SSID unless the host app (SwiftBar) has Location Services
+# permission: networksetup returns "...not associated...", ipconfig prints
+# "<redacted>", CoreWLAN returns nil. Try each source, but treat every
+# placeholder as unknown and show a clean label — never leak "<redacted>"
+# or the error string into the headline as if it were the network name.
+SSID=$(networksetup -getairportnetwork en0 2>/dev/null | sed 's/^Current Wi-Fi Network: //')
+case "$SSID" in
+    ""|*"not associated"*)
+        SSID=$(ipconfig getsummary en0 2>/dev/null | sed -n 's/^[[:space:]]*SSID : //p' | head -1) ;;
+esac
+case "$SSID" in
+    ""|"<"*|*"not associated"*) SSID="Wi-Fi" ;;   # "<redacted>", empty, error string
+esac
 SNR=$((RSSI - NOISE))
 
 # Is Wi-Fi DNS pinned to a custom resolver? Pinned public DNS (e.g.
@@ -152,26 +163,39 @@ check_hotspot() {
 }
 
 measure_internet_and_latency() {
-    local out loss stats avg stddev
-    out=$(ping -c 5 -i 0.2 -W 1 1.1.1.1 2>/dev/null)
-    if [ -z "$out" ] || ! echo "$out" | grep -q "packets transmitted"; then
-        nc -z -w 3 1.1.1.1 443 2>/dev/null && return
-        NO_INTERNET=1
+    local out loss stats avg stddev t
+
+    # Latency / jitter / loss via ICMP to 1.1.1.1. NOTE: on macOS `-W` is
+    # in MILLISECONDS (the old `-W 1` meant 1ms, so on any real link every
+    # reply landed "out of wait time"); 2000ms tolerates high-RTT links.
+    out=$(ping -c 5 -i 0.2 -W 2000 1.1.1.1 2>/dev/null)
+    loss=100
+    if echo "$out" | grep -q "min/avg/max"; then
+        loss=$(echo "$out" | awk -F'[%]' '/packet loss/ {print $1}' | awk '{print $NF}')
+        loss=${loss%.*}; loss=${loss:-100}
+    fi
+
+    # Healthy ICMP ⇒ trivially online: record metrics and we're done.
+    if [ "$loss" -lt 100 ] 2>/dev/null; then
+        stats=$(echo "$out" | grep -E 'min/avg/max')
+        avg=$(echo "$stats" | awk -F'=' '{print $2}' | awk -F'/' '{print $2}' | cut -d. -f1)
+        stddev=$(echo "$stats" | awk -F'=' '{print $2}' | awk -F'/' '{print $4}' | cut -d. -f1)
+        LATENCY_AVG=${avg:-0}
+        LATENCY_JITTER=${stddev:-0}
+        PACKET_LOSS=$loss
         return
     fi
-    loss=$(echo "$out" | awk -F'[%]' '/packet loss/ {print $1}' | awk '{print $NF}')
-    loss=${loss:-100}
-    loss=${loss%.*}
-    if [ "$loss" -eq 100 ] 2>/dev/null; then
-        NO_INTERNET=1
-        return
-    fi
-    stats=$(echo "$out" | grep -E 'min/avg/max')
-    avg=$(echo "$stats" | awk -F'=' '{print $2}' | awk -F'/' '{print $2}' | cut -d. -f1)
-    stddev=$(echo "$stats" | awk -F'=' '{print $2}' | awk -F'/' '{print $4}' | cut -d. -f1)
-    LATENCY_AVG=${avg:-0}
-    LATENCY_JITTER=${stddev:-0}
-    PACKET_LOSS=$loss
+
+    # ICMP to 1.1.1.1 fully failed — but that ALONE is not "no internet":
+    # the host may filter ICMP, or 1.1.1.1 may be unreachable/lossy on this
+    # network while the web works fine (this was the false-"No Internet"
+    # bug — a single blocked/lossy ICMP target read as offline). Only
+    # declare offline if a real TCP handshake to :443 fails on EVERY
+    # fallback target. Latency stays blank when ICMP is unusable.
+    for t in 1.1.1.1 8.8.8.8 9.9.9.9; do
+        nc -z -w 2 "$t" 443 2>/dev/null && return
+    done
+    NO_INTERNET=1
 }
 
 interpret_internet_and_latency() {
@@ -589,6 +613,13 @@ fi
 echo "---"
 echo "$SSID_DISPLAY — $LABEL | size=14 color=$FG"
 echo "$MSG | size=11 color=$FG_DIM"
+
+# Manual re-check — always the first action so it's reachable the moment
+# the dot goes bad. `recheck` busts the heavy-check cache (ping, captive
+# portal, DNS, HTTPS) and refresh=true re-runs the plugin immediately, so
+# a click re-diagnoses on demand instead of waiting out the cycle.
+echo "---"
+echo "↻ Refresh now | shell=\"$ACTIONS\" param1=recheck terminal=false refresh=true size=13 color=$FG"
 
 # Actionable recommendations + one-click fixes stay at the top level —
 # they only appear when there's actually something to act on.
