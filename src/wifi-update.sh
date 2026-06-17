@@ -30,7 +30,15 @@ case "${1:-check}" in
                 local_sha=$(git -C "$REPO" rev-parse HEAD 2>/dev/null)
                 remote_sha=$(git -C "$REPO" rev-parse "origin/${branch:-main}" 2>/dev/null)
                 if [ -n "$local_sha" ] && [ -n "$remote_sha" ]; then
-                    [ "$local_sha" = "$remote_sha" ] && state="current" || state="available"
+                    if [ "$local_sha" = "$remote_sha" ] || \
+                       git -C "$REPO" merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+                        # At remote, or AHEAD of it (unpushed local commits).
+                        # Either way there's nothing to pull — only nag when
+                        # the remote actually has commits we don't.
+                        state="current"
+                    else
+                        state="available"
+                    fi
                 fi
             fi
         fi
